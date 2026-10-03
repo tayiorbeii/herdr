@@ -934,6 +934,31 @@ impl<'de> Deserialize<'de> for PaneBordersConfig {
     }
 }
 
+/// `ui.pane_padding_cells`, parsed per field so a malformed value disables only
+/// pane padding instead of rejecting the whole `[ui]` section. `Err` keeps the
+/// rejected TOML value for the diagnostic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PanePaddingCellsConfig(Result<u16, String>);
+
+impl Default for PanePaddingCellsConfig {
+    fn default() -> Self {
+        Self(Ok(0))
+    }
+}
+
+impl<'de> Deserialize<'de> for PanePaddingCellsConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = toml::Value::deserialize(deserializer)?;
+        Ok(Self(match value {
+            toml::Value::Integer(cells) => u16::try_from(cells).map_err(|_| cells.to_string()),
+            other => Err(other.to_string()),
+        }))
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct UiConfig {
@@ -978,6 +1003,9 @@ pub struct UiConfig {
     pub pane_scrollbars: bool,
     /// Keep split panes visually separated instead of sharing divider borders. Default: true.
     pub pane_gaps: bool,
+    /// Empty terminal cells kept on each side between a pane's frame (or edge)
+    /// and its terminal content. Shrinks so the PTY keeps its minimum size. Default: 0.
+    pub pane_padding_cells: PanePaddingCellsConfig,
     /// Show agent labels in split pane borders when no manual pane label is set. Default: false.
     pub show_agent_labels_on_pane_borders: bool,
     /// Hide the tab row when the workspace has one tab. Default: false.
@@ -1214,6 +1242,7 @@ impl Default for UiConfig {
             pane_outer_borders: true,
             pane_scrollbars: true,
             pane_gaps: true,
+            pane_padding_cells: PanePaddingCellsConfig::default(),
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
@@ -1240,6 +1269,19 @@ impl UiConfig {
 
     pub fn right_click_passthrough_modifiers(&self) -> Option<KeyModifiers> {
         self.right_click_passthrough_modifier.modifiers()
+    }
+
+    /// Effective pane padding; a malformed setting disables padding.
+    pub fn pane_padding_cells(&self) -> u16 {
+        *self.pane_padding_cells.0.as_ref().unwrap_or(&0)
+    }
+
+    pub(crate) fn pane_padding_cells_diagnostic(&self) -> Option<String> {
+        self.pane_padding_cells.0.as_ref().err().map(|value| {
+            format!(
+                "ui.pane_padding_cells = {value} is not a whole number of cells from 0 to 65535; disabling pane padding"
+            )
+        })
     }
 }
 
@@ -1510,6 +1552,55 @@ status_indicators = "symbols"
             .unwrap_err()
             .to_string();
         assert!(wrong_type.contains("\"auto\", \"always\", \"off\", or a legacy boolean"));
+    }
+
+    #[test]
+    fn pane_padding_cells_defaults_to_zero_and_parses_u16_range() {
+        let default_config = Config::default();
+        assert_eq!(default_config.ui.pane_padding_cells(), 0);
+        assert_eq!(default_config.ui.pane_padding_cells_diagnostic(), None);
+
+        for (raw, expected) in [("0", 0), ("2", 2), ("65535", u16::MAX)] {
+            let config: Config =
+                toml::from_str(&format!("[ui]\npane_padding_cells = {raw}")).unwrap();
+            assert_eq!(config.ui.pane_padding_cells(), expected, "{raw}");
+            assert_eq!(config.ui.pane_padding_cells_diagnostic(), None, "{raw}");
+        }
+    }
+
+    #[test]
+    fn pane_padding_cells_malformed_value_disables_only_padding() {
+        for raw in [
+            "-1",
+            "65536",
+            "1.5",
+            "\"2\"",
+            "true",
+            "[1]",
+            "{ cells = 1 }",
+        ] {
+            let config: Config = toml::from_str(&format!(
+                "[ui]\npane_padding_cells = {raw}\npane_gaps = false\npane_scrollbars = false\n"
+            ))
+            .unwrap_or_else(|err| panic!("{raw} rejected the whole config: {err}"));
+            assert_eq!(config.ui.pane_padding_cells(), 0, "{raw}");
+            assert!(!config.ui.pane_gaps, "{raw}: sibling key dropped");
+            assert!(!config.ui.pane_scrollbars, "{raw}: sibling key dropped");
+            let diagnostic = config
+                .ui
+                .pane_padding_cells_diagnostic()
+                .unwrap_or_else(|| panic!("{raw}: missing diagnostic"));
+            assert_eq!(
+                diagnostic,
+                format!(
+                    "ui.pane_padding_cells = {raw} is not a whole number of cells from 0 to 65535; disabling pane padding"
+                )
+            );
+            assert!(
+                config.collect_diagnostics().contains(&diagnostic),
+                "{raw}: startup diagnostics omit the field"
+            );
+        }
     }
 
     #[test]

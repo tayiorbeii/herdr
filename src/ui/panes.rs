@@ -46,6 +46,24 @@ fn terminal_inner_rect(rt: &TerminalRuntime, pane_inner: Rect, pane_scrollbars: 
     )
 }
 
+/// Inset terminal content by `padding` empty cells per side, after the frame and
+/// scrollbar gutter are allocated. Padding never shrinks an axis below the PTY
+/// size floor, so the PTY always matches the padded rect; an axis already below
+/// the floor keeps its baseline size, and a rect with no area is unchanged.
+pub(crate) fn pad_pane_content(content: Rect, padding: u16) -> Rect {
+    if padding == 0 || content.is_empty() {
+        return content;
+    }
+    let pad_x = padding.min(content.width.saturating_sub(crate::pane::MIN_PTY_COLS) / 2);
+    let pad_y = padding.min(content.height.saturating_sub(crate::pane::MIN_PTY_ROWS) / 2);
+    Rect::new(
+        content.x.saturating_add(pad_x),
+        content.y.saturating_add(pad_y),
+        content.width - 2 * pad_x,
+        content.height - 2 * pad_y,
+    )
+}
+
 pub(crate) fn pane_inner_rect(area: Rect, borders: Borders) -> Rect {
     if borders.is_empty() {
         area
@@ -185,10 +203,11 @@ fn stable_scrollbar_gutter(
     rt: &TerminalRuntime,
     pane_inner: Rect,
     pane_scrollbars: bool,
+    pane_padding: u16,
 ) -> (Rect, Option<Rect>) {
     let inner_rect = terminal_inner_rect(rt, pane_inner, pane_scrollbars);
     if inner_rect == pane_inner {
-        return (inner_rect, None);
+        return (pad_pane_content(inner_rect, pane_padding), None);
     }
     let gutter = Rect::new(
         pane_inner.x + pane_inner.width.saturating_sub(1),
@@ -201,7 +220,7 @@ fn stable_scrollbar_gutter(
         .filter(|metrics| should_show_scrollbar(*metrics))
         .map(|_| gutter);
 
-    (inner_rect, scrollbar_rect)
+    (pad_pane_content(inner_rect, pane_padding), scrollbar_rect)
 }
 
 /// Resize every visible runtime in a tab to the geometry it would receive if the tab were selected.
@@ -226,7 +245,10 @@ pub(super) fn resize_tab_panes(
                 Borders::NONE
             };
             let pane_inner = pane_inner_rect(area, borders);
-            let inner_rect = terminal_inner_rect(rt, pane_inner, app.pane_scrollbars);
+            let inner_rect = pad_pane_content(
+                terminal_inner_rect(rt, pane_inner, app.pane_scrollbars),
+                app.pane_padding_cells,
+            );
             if !app.direct_attach_resize_locks.contains(terminal_id) {
                 rt.resize(
                     inner_rect.height,
@@ -250,7 +272,10 @@ pub(super) fn resize_tab_panes(
         if let Some((terminal_id, rt)) =
             runtime_for_tab_pane(app, terminal_runtimes, workspace_index, tab, info.id)
         {
-            let inner_rect = terminal_inner_rect(rt, pane_inner, app.pane_scrollbars);
+            let inner_rect = pad_pane_content(
+                terminal_inner_rect(rt, pane_inner, app.pane_scrollbars),
+                app.pane_padding_cells,
+            );
             if !app.direct_attach_resize_locks.contains(terminal_id) {
                 rt.resize(
                     inner_rect.height,
@@ -291,11 +316,15 @@ pub(super) fn compute_pane_infos_for_tab(
             Borders::NONE
         };
         let pane_inner = pane_inner_rect(area, borders);
-        let mut inner_rect = pane_inner;
+        let mut inner_rect = pad_pane_content(pane_inner, app.pane_padding_cells);
         let mut scrollbar_rect = None;
         if let Some(rt) = app.runtime_for_pane_in_workspace(terminal_runtimes, ws_idx, focused_id) {
-            (inner_rect, scrollbar_rect) =
-                stable_scrollbar_gutter(rt, pane_inner, app.pane_scrollbars);
+            (inner_rect, scrollbar_rect) = stable_scrollbar_gutter(
+                rt,
+                pane_inner,
+                app.pane_scrollbars,
+                app.pane_padding_cells,
+            );
             if resize_panes
                 && tab.terminal_id(focused_id).is_some_and(|terminal_id| {
                     !app.direct_attach_resize_locks.contains(terminal_id)
@@ -329,11 +358,15 @@ pub(super) fn compute_pane_infos_for_tab(
     for info in &mut pane_infos {
         let pane_inner = pane_inner_rect(info.rect, info.borders);
 
-        let mut inner_rect = pane_inner;
+        let mut inner_rect = pad_pane_content(pane_inner, app.pane_padding_cells);
         let mut scrollbar_rect = None;
         if let Some(rt) = app.runtime_for_pane_in_workspace(terminal_runtimes, ws_idx, info.id) {
-            (inner_rect, scrollbar_rect) =
-                stable_scrollbar_gutter(rt, pane_inner, app.pane_scrollbars);
+            (inner_rect, scrollbar_rect) = stable_scrollbar_gutter(
+                rt,
+                pane_inner,
+                app.pane_scrollbars,
+                app.pane_padding_cells,
+            );
             if resize_panes
                 && tab.terminal_id(info.id).is_some_and(|terminal_id| {
                     !app.direct_attach_resize_locks.contains(terminal_id)
@@ -1549,6 +1582,316 @@ mod tests {
             assert_eq!(
                 automatic_selection_bg(&palette, Default::default()),
                 fallback
+            );
+        }
+    }
+
+    fn scrollback_lines() -> Vec<u8> {
+        (0..40)
+            .map(|n| format!("line {n}\r\n"))
+            .collect::<String>()
+            .into_bytes()
+    }
+
+    fn padded_split_app(padding: u16, bytes: &[u8]) -> AppState {
+        let mut app = AppState::test_new();
+        app.pane_padding_cells = padding;
+        let mut workspace = Workspace::test_new("test");
+        let left = workspace.tabs[0].root_pane;
+        let right = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        for pane in [left, right] {
+            workspace.tabs[0].runtimes.insert(
+                pane,
+                TerminalRuntime::test_with_scrollback_bytes(40, 12, 4096, bytes),
+            );
+        }
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+        app
+    }
+
+    fn infos_for(app: &AppState, area: Rect, resize_panes: bool) -> Vec<PaneInfo> {
+        compute_pane_infos(
+            app,
+            &TerminalRuntimeRegistry::new(),
+            area,
+            resize_panes,
+            crate::kitty_graphics::HostCellSize::default(),
+        )
+    }
+
+    fn pty_size(app: &AppState, pane: PaneId) -> (u16, u16) {
+        app.workspaces[0].tabs[0].runtimes[&pane].current_size()
+    }
+
+    #[tokio::test]
+    async fn pane_padding_insets_framed_split_content_inside_scrollbar_lane() {
+        let area = Rect::new(0, 0, 81, 12);
+        let baseline = infos_for(&padded_split_app(0, &scrollback_lines()), area, false);
+        let app = padded_split_app(2, &scrollback_lines());
+        let padded = infos_for(&app, area, true);
+
+        assert_eq!(padded.len(), 2);
+        // Separate apps allocate different pane ids; panes compare by layout order.
+        for (base, info) in baseline.iter().zip(&padded) {
+            assert_eq!(info.rect, base.rect, "allocation must not change");
+            assert_eq!(info.borders, base.borders, "border sides must not change");
+            assert_eq!(
+                info.scrollbar_rect, base.scrollbar_rect,
+                "lane must not move"
+            );
+            assert_eq!(
+                info.inner_rect,
+                Rect::new(
+                    base.inner_rect.x + 2,
+                    base.inner_rect.y + 2,
+                    base.inner_rect.width - 4,
+                    base.inner_rect.height - 4,
+                )
+            );
+            let lane = info.scrollbar_rect.expect("scrollback shows the lane");
+            assert_eq!(info.inner_rect.right() + 2, lane.x);
+            assert_eq!(
+                (lane.y, lane.height),
+                (base.inner_rect.y, base.inner_rect.height)
+            );
+            assert_eq!(
+                pty_size(&app, info.id),
+                (info.inner_rect.height, info.inner_rect.width)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn pane_padding_insets_unframed_lone_pane() {
+        let mut app = AppState::test_new();
+        app.pane_scrollbars = false;
+        app.pane_padding_cells = 3;
+        let mut workspace = Workspace::test_new("test");
+        let root = workspace.tabs[0].root_pane;
+        workspace.tabs[0].runtimes.insert(
+            root,
+            TerminalRuntime::test_with_scrollback_bytes(40, 8, 1024, b"ready\r\n"),
+        );
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+
+        let area = Rect::new(10, 3, 40, 8);
+        let infos = infos_for(&app, area, true);
+
+        assert_eq!(infos[0].borders, Borders::NONE);
+        assert_eq!(infos[0].rect, area);
+        assert_eq!(infos[0].scrollbar_rect, None);
+        assert_eq!(infos[0].inner_rect, Rect::new(13, 6, 34, 2));
+        assert_eq!(pty_size(&app, root), (2, 34));
+    }
+
+    #[test]
+    fn pane_padding_clamps_symmetrically_to_the_pty_size_floor() {
+        use crate::pane::{MIN_PTY_COLS, MIN_PTY_ROWS};
+        assert_eq!((MIN_PTY_COLS, MIN_PTY_ROWS), (4, 2));
+        for (content, padding, expected) in [
+            (Rect::new(4, 2, 30, 10), 2, Rect::new(6, 4, 26, 6)),
+            (Rect::new(4, 2, 8, 6), 10, Rect::new(6, 4, 4, 2)),
+            (Rect::new(4, 2, 9, 5), 10, Rect::new(6, 3, 5, 3)),
+            (Rect::new(4, 2, 5, 4), 10, Rect::new(4, 3, 5, 2)),
+            (Rect::new(4, 2, 6, 3), 10, Rect::new(5, 2, 4, 3)),
+            (Rect::new(4, 2, 30, 10), u16::MAX, Rect::new(17, 6, 4, 2)),
+            // An axis already below the floor keeps its baseline size.
+            (Rect::new(4, 2, 3, 3), 1, Rect::new(4, 2, 3, 3)),
+            (Rect::new(4, 2, 2, 9), 5, Rect::new(4, 5, 2, 3)),
+            (Rect::new(4, 2, 1, 1), 5, Rect::new(4, 2, 1, 1)),
+            (Rect::new(4, 2, 0, 5), 5, Rect::new(4, 2, 0, 5)),
+            (Rect::new(4, 2, 7, 0), 5, Rect::new(4, 2, 7, 0)),
+            (Rect::new(4, 2, 0, 0), 5, Rect::new(4, 2, 0, 0)),
+        ] {
+            assert_eq!(
+                pad_pane_content(content, padding),
+                expected,
+                "{content:?} padded by {padding}"
+            );
+        }
+        for width in 0..12 {
+            for height in 0..8 {
+                let content = Rect::new(3, 1, width, height);
+                let padded = pad_pane_content(content, 3);
+                assert!(padded.width >= width.min(MIN_PTY_COLS), "{content:?}");
+                assert!(padded.height >= height.min(MIN_PTY_ROWS), "{content:?}");
+                assert_eq!(width - padded.width, 2 * (padded.x - content.x));
+                assert_eq!(height - padded.height, 2 * (padded.y - content.y));
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn padded_pty_size_matches_content_rect_at_the_size_floor() {
+        let pane_app = |pane_borders, padding, cols, rows| {
+            let mut app = AppState::test_new();
+            app.pane_borders = pane_borders;
+            app.pane_padding_cells = padding;
+            let mut workspace = Workspace::test_new("test");
+            let root = workspace.tabs[0].root_pane;
+            workspace.tabs[0].runtimes.insert(
+                root,
+                TerminalRuntime::test_with_scrollback_bytes(cols, rows, 1024, b"$ \r\n"),
+            );
+            app.workspaces = vec![workspace];
+            app.active = Some(0);
+            (app, root)
+        };
+
+        // QA D13: 37x5 framed pane, padding 1. Frame interior 35x3, gutter
+        // leaves 34x3; rows stay at 3 so the prompt row is not clipped.
+        let (app, root) = pane_app(PaneBordersConfig::Always, 1, 37, 5);
+        let infos = infos_for(&app, Rect::new(0, 0, 37, 5), true);
+        assert_eq!(infos[0].inner_rect, Rect::new(2, 1, 32, 3));
+        assert_eq!(pty_size(&app, root), (3, 32));
+
+        // QA D14: narrow unframed panes, padding 3.
+        for cols in 5..=7 {
+            for rows in 2..=6 {
+                let (app, root) = pane_app(PaneBordersConfig::Off, 3, cols, rows);
+                let info = &infos_for(&app, Rect::new(0, 0, cols, rows), true)[0];
+                assert!(info.inner_rect.width >= crate::pane::MIN_PTY_COLS);
+                assert!(info.inner_rect.height >= crate::pane::MIN_PTY_ROWS);
+                assert_eq!(
+                    pty_size(&app, root),
+                    (info.inner_rect.height, info.inner_rect.width),
+                    "{cols}x{rows}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn zero_pane_padding_matches_baseline_geometry() {
+        for rect in [
+            Rect::new(0, 0, 0, 0),
+            Rect::new(3, 4, 1, 1),
+            Rect::new(3, 4, 80, 24),
+        ] {
+            assert_eq!(pad_pane_content(rect, 0), rect);
+        }
+
+        let area = Rect::new(0, 0, 81, 12);
+        let app = padded_split_app(0, &scrollback_lines());
+        for info in infos_for(&app, area, true) {
+            let rt = &app.workspaces[0].tabs[0].runtimes[&info.id];
+            let unpadded = terminal_inner_rect(rt, pane_inner_rect(info.rect, info.borders), true);
+            assert_eq!(info.inner_rect, unpadded);
+            assert_eq!(pty_size(&app, info.id), (unpadded.height, unpadded.width));
+        }
+    }
+
+    #[tokio::test]
+    async fn pane_padding_render_leaves_padding_cells_blank() {
+        let area = Rect::new(0, 0, 41, 10);
+        let draw = |padding| {
+            let app = padded_split_app(padding, b"ab");
+            let registry = TerminalRuntimeRegistry::new();
+            let infos = compute_pane_infos(
+                &app,
+                &registry,
+                area,
+                true,
+                crate::kitty_graphics::HostCellSize::default(),
+            );
+            let splits = app.workspaces[0].tabs[0].layout.splits(area);
+            let mut terminal =
+                ratatui::Terminal::new(ratatui::backend::TestBackend::new(41, 10)).unwrap();
+            terminal
+                .draw(|frame| {
+                    render_panes(
+                        &app,
+                        &registry,
+                        frame,
+                        Some(super::super::tab_surface::TabSurfaceTarget {
+                            workspace_index: 0,
+                            tab_index: 0,
+                        }),
+                        &infos,
+                        &splits,
+                    )
+                })
+                .unwrap();
+            (terminal.backend().buffer().clone(), infos)
+        };
+        let (baseline, base_infos) = draw(0);
+        let (padded, infos) = draw(1);
+
+        for y in 0..area.height {
+            for x in 0..area.width {
+                let cell = ratatui::layout::Position::new(x, y);
+                if !base_infos.iter().any(|info| info.inner_rect.contains(cell)) {
+                    assert_eq!(padded[(x, y)], baseline[(x, y)], "chrome cell {x},{y}");
+                } else if !infos.iter().any(|info| info.inner_rect.contains(cell)) {
+                    assert_eq!(padded[(x, y)].symbol(), " ", "padding cell {x},{y}");
+                }
+            }
+        }
+        for (base, info) in base_infos.iter().zip(&infos) {
+            assert_eq!(
+                baseline[(base.inner_rect.x, base.inner_rect.y)].symbol(),
+                "a"
+            );
+            assert_eq!(padded[(info.inner_rect.x, info.inner_rect.y)].symbol(), "a");
+            assert_eq!(
+                padded[(info.inner_rect.x + 1, info.inner_rect.y)].symbol(),
+                "b"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn zoomed_pane_padding_resizes_pty_to_padded_rect() {
+        let mut app = AppState::test_new();
+        app.pane_padding_cells = 1;
+        let mut workspace = Workspace::test_new("test");
+        let focused = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        workspace.zoomed = true;
+        workspace.tabs[0].runtimes.insert(
+            focused,
+            TerminalRuntime::test_with_scrollback_bytes(40, 8, 1024, b"ready\r\n"),
+        );
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+        let area = Rect::new(10, 3, 40, 8);
+
+        // Frame interior (11,4,38,6), scrollbar gutter leaves (11,4,37,6).
+        let infos = infos_for(&app, area, true);
+        assert_eq!(infos[0].rect, area);
+        assert_eq!(infos[0].inner_rect, Rect::new(12, 5, 35, 4));
+        assert_eq!(pty_size(&app, focused), (4, 35));
+
+        app.workspaces[0].tabs[0].runtimes[&focused].resize(8, 40, 0, 0);
+        resize_tab_panes(
+            &app,
+            &TerminalRuntimeRegistry::new(),
+            0,
+            &app.workspaces[0].tabs[0],
+            area,
+            crate::kitty_graphics::HostCellSize::default(),
+        );
+        assert_eq!(pty_size(&app, focused), (4, 35));
+    }
+
+    #[tokio::test]
+    async fn background_tab_resize_applies_pane_padding() {
+        let area = Rect::new(0, 0, 81, 12);
+        let app = padded_split_app(2, &scrollback_lines());
+        resize_tab_panes(
+            &app,
+            &TerminalRuntimeRegistry::new(),
+            0,
+            &app.workspaces[0].tabs[0],
+            area,
+            crate::kitty_graphics::HostCellSize::default(),
+        );
+        let baseline = infos_for(&padded_split_app(0, &scrollback_lines()), area, false);
+        for (base, info) in baseline.iter().zip(infos_for(&app, area, false)) {
+            assert_eq!(
+                pty_size(&app, info.id),
+                (base.inner_rect.height - 4, base.inner_rect.width - 4)
             );
         }
     }

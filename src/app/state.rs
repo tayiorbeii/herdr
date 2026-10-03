@@ -834,6 +834,8 @@ pub struct AppState {
     pub pane_outer_borders: bool,
     pub pane_scrollbars: bool,
     pub pane_gaps: bool,
+    /// Effective `ui.pane_padding_cells`; 0 keeps the unpadded content rect.
+    pub pane_padding_cells: u16,
     pub show_agent_labels_on_pane_borders: bool,
     pub tab_bar_right: Vec<TabBarStatusSegment>,
     pub tab_bar_right_separator: String,
@@ -1060,6 +1062,7 @@ impl AppState {
             pane_outer_borders: true,
             pane_scrollbars: true,
             pane_gaps: false,
+            pane_padding_cells: 0,
             show_agent_labels_on_pane_borders: false,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: " ".into(),

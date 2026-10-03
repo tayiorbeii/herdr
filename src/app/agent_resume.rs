@@ -152,6 +152,7 @@ impl App {
             self.state.pane_borders,
             self.state.pane_gaps,
             self.state.pane_outer_borders,
+            self.state.pane_padding_cells,
         );
 
         if self.state.active == Some(ws_idx)
@@ -324,6 +325,7 @@ fn derived_pending_agent_resume_pane_infos(
     pane_borders: crate::config::PaneBordersConfig,
     pane_gaps: bool,
     pane_outer_borders: bool,
+    pane_padding_cells: u16,
 ) -> Vec<crate::layout::PaneInfo> {
     crate::ui::apply_pane_chrome(
         tab.layout.panes(terminal_area),
@@ -334,7 +336,8 @@ fn derived_pending_agent_resume_pane_infos(
     .into_iter()
     .map(|mut info| {
         let pane_inner = crate::ui::pane_inner_rect(info.rect, info.borders);
-        info.inner_rect = stable_terminal_inner_rect(pane_inner);
+        info.inner_rect =
+            crate::ui::pad_pane_content(stable_terminal_inner_rect(pane_inner), pane_padding_cells);
         info
     })
     .collect()
@@ -394,6 +397,25 @@ mod tests {
             api_rx,
             crate::api::EventHub::default(),
         )
+    }
+
+    #[test]
+    fn pending_resume_size_applies_pane_padding() {
+        let workspace = crate::workspace::Workspace::test_new("restored");
+        let area = Rect::new(0, 0, 100, 30);
+        let infos = |padding| {
+            derived_pending_agent_resume_pane_infos(
+                &workspace.tabs[0],
+                area,
+                crate::config::PaneBordersConfig::Auto,
+                true,
+                true,
+                padding,
+            )
+        };
+
+        assert_eq!(infos(0)[0].inner_rect, Rect::new(0, 0, 99, 30));
+        assert_eq!(infos(2)[0].inner_rect, Rect::new(2, 2, 95, 26));
     }
 
     #[tokio::test]

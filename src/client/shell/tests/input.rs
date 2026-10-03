@@ -469,6 +469,69 @@ fn pixel_host_reports_use_cells_without_target_pixel_mode_and_release_outside() 
 }
 
 #[test]
+fn padded_pane_reports_mouse_from_the_published_content_origin() {
+    // Pane padding publishes an inner rect inset inside the pane rect.
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    let mut pane_surface = surface();
+    let buffer = Buffer::with_lines(["", "", "  LIVE", "  PANE", "", ""]);
+    pane_surface.frame = FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, None, &[]);
+    pane_surface.panes[0].rect = SurfaceRect {
+        x: 0,
+        y: 0,
+        width: 8,
+        height: 6,
+    };
+    pane_surface.panes[0].inner_rect = SurfaceRect {
+        x: 2,
+        y: 2,
+        width: 4,
+        height: 2,
+    };
+    pane_surface.panes[0].mouse_reporting = true;
+    state.set_pane_surface(pane_surface);
+    state.compose(106, 20).expect("composed frame");
+    let pane = state.hits.panes[0].clone();
+    assert_eq!(pane.inner_rect.x - pane.rect.x, 2);
+    assert_eq!(pane.inner_rect.y - pane.rect.y, 2);
+    let geometry =
+        crate::input::mouse::HostGeometry::new(106, 20, 1060, 400).expect("host geometry");
+    let press = |column: u16, row: u16| {
+        format!(
+            "\x1b[<0;{};{}M",
+            u32::from(column) * 10 + 1,
+            u32::from(row) * 20 + 1
+        )
+    };
+
+    let padding =
+        state.handle_pixel_mouse(press(pane.rect.x + 1, pane.rect.y + 1).as_bytes(), geometry);
+    assert!(
+        !padding
+            .requests
+            .iter()
+            .any(|request| matches!(request, ClientMessage::ClientShellPaneInput { .. })),
+        "a press in the padding must not reach the PTY"
+    );
+
+    let content = state.handle_pixel_mouse(
+        press(pane.inner_rect.x, pane.inner_rect.y).as_bytes(),
+        geometry,
+    );
+    assert!(content.requests.iter().any(|request| matches!(
+        request,
+        ClientMessage::ClientShellPaneInput { events, .. }
+            if matches!(
+                &events[..],
+                [ClientPaneInputEvent::Mouse {
+                    position: ClientMousePosition::Cell { column: 0, row: 0 },
+                    ..
+                }]
+            )
+    )));
+}
+
+#[test]
 fn shell_targets_unconsumed_input_and_keeps_prefix_local() {
     let config = ClientShellConfig::from_config(&Config::default());
     let mut state = ClientShellState::new(config);
