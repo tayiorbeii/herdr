@@ -988,6 +988,12 @@
           "description": "Keep split panes visually separated instead of sharing divider borders."
         },
         {
+          "key": "ui.pane_focus_weight",
+          "type": "boolean",
+          "default": "false",
+          "description": "Draw the focused pane's border with heavy line glyphs in addition to its accent color, so focus is visible without relying on color. Geometry, dividers and junctions are unchanged."
+        },
+        {
           "key": "ui.show_agent_labels_on_pane_borders",
           "type": "boolean",
           "default": "false",

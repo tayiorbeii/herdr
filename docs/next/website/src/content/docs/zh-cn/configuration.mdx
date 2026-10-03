@@ -309,6 +309,8 @@ text = "#cdd6f4"
 
 `ui.pane_borders` 接受 `"auto"`（默认值，仅为分割窗格显示边框）、`"always"`（也为单个窗格显示边框）或 `"off"`。单窗格的所有边都是外边，因此还需要 `ui.pane_outer_borders = true` 才会显示边框。旧的布尔值仍然有效：`true` 对应 `"auto"`，`false` 对应 `"off"`。
 
+在 `[ui]` 下设置 `pane_focus_weight = true`，可在强调色之外用粗线绘制当前聚焦窗格的边框，从而不依赖颜色也能识别焦点。默认值为 `false`，保持原有外观。共享分隔线仍然共享：只有沿聚焦窗格的线段变粗，连接处保留所有线条。窗格尺寸、分隔线位置和点击区域都不会改变。此提示需要可见边框；在 `pane_borders = "off"` 时不起作用。
+
 在 `[ui]` 下设置 `tab_bar_position = "bottom"`，可将桌面标签栏放到终端窗格下方。Prefix、Navigate、Copy 和 Resize 模式栏会在显示期间临时替换底部标签栏。默认值为 `"top"`。
 
 可在标签栏右侧配置一个类似 tmux 的有序状态区：

@@ -491,6 +491,7 @@ impl App {
             pane_outer_borders: config.ui.pane_outer_borders,
             pane_scrollbars: config.ui.pane_scrollbars,
             pane_gaps: config.ui.pane_gaps,
+            pane_focus_weight: config.ui.pane_focus_weight,
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: String::new(),
@@ -840,6 +841,7 @@ impl App {
                 self.state.pane_outer_borders = config.ui.pane_outer_borders;
                 self.state.pane_scrollbars = config.ui.pane_scrollbars;
                 self.state.pane_gaps = config.ui.pane_gaps;
+                self.state.pane_focus_weight = config.ui.pane_focus_weight;
                 self.state.show_agent_labels_on_pane_borders =
                     config.ui.show_agent_labels_on_pane_borders;
                 self.configure_tab_bar_status(
@@ -1739,6 +1741,32 @@ mod tests {
         assert_eq!(toast.kind, crate::app::state::ToastKind::UpdateInstalled);
         assert_eq!(toast.title, "reloaded config");
         assert_eq!(toast.context, "using config.toml");
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_config_applies_and_removes_pane_focus_weight() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-pane-focus-weight");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let base = "[update]\nversion_check = false\nmanifest_check = false\n[ui]\n";
+
+        let mut app = test_app();
+        assert!(!app.state.pane_focus_weight);
+        for (body, expected) in [
+            ("pane_focus_weight = true\n", true),
+            ("pane_focus_weight = false\n", false),
+            ("pane_focus_weight = true\n", true),
+            ("", false),
+        ] {
+            std::fs::write(&path, format!("{base}{body}")).unwrap();
+            let report = app.reload_config();
+            assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+            assert_eq!(app.state.pane_focus_weight, expected, "{body:?}");
+        }
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());

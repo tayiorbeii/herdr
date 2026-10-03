@@ -303,6 +303,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Keep split panes visually separated instead of sharing divider borders.
 # pane_gaps = true
 
+# Draw the focused pane's border with heavy line glyphs as well as its accent color,
+# so focus stays visible without color. Geometry and shared dividers are unchanged.
+# pane_focus_weight = false
+
 # Show detected/reported agent labels in split pane borders when no manual pane name is set.
 # show_agent_labels_on_pane_borders = false
 
