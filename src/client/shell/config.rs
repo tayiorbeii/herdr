@@ -121,6 +121,7 @@ impl ClientShellConfig {
             mobile_width_threshold: config.ui.mobile_width_threshold,
             tab_bar_position: config.ui.tab_bar_position,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
+            rounded_borders: config.ui.rounded_borders,
             spaces: config.ui.sidebar.spaces.clone(),
             agents: config.ui.sidebar.agents.clone(),
             agent_panel_sort: config.ui.agent_panel_sort,
@@ -323,6 +324,7 @@ impl ClientShellConfig {
                 self.mobile_width_threshold = ui.mobile_width_threshold;
                 self.tab_bar_position = ui.tab_bar_position;
                 self.hide_tab_bar_when_single_tab = ui.hide_tab_bar_when_single_tab;
+                self.rounded_borders = ui.rounded_borders;
                 self.spaces = ui.sidebar.spaces.clone();
                 self.agents = ui.sidebar.agents.clone();
                 self.agent_panel_sort = ui.agent_panel_sort;
@@ -449,6 +451,38 @@ mod tests {
     use crossterm::event::{KeyCode, KeyModifiers};
 
     use super::*;
+
+    #[test]
+    fn rounded_borders_load_reload_and_remove_without_geometry_changes() {
+        let default = Config::default();
+        let mut shell = ClientShellConfig::from_config(&default);
+        assert!(!shell.rounded_borders);
+        let baseline = shell.initial_surface_size(120, 40);
+        let enabled: Config = toml::from_str("[ui]\nrounded_borders = true\n").unwrap();
+        assert!(ClientShellConfig::from_config(&enabled).rounded_borders);
+        assert!(shell.apply_live_config(&enabled, &[], &[]).is_empty());
+        assert!(shell.rounded_borders);
+        assert_eq!(shell.initial_surface_size(120, 40), baseline);
+        assert!(shell.apply_live_config(&default, &[], &[]).is_empty());
+        assert!(!shell.rounded_borders);
+        assert_eq!(shell.initial_surface_size(120, 40), baseline);
+    }
+
+    #[test]
+    fn rounded_borders_invalid_ui_keeps_existing_client_preference() {
+        let mut enabled = Config::default();
+        enabled.ui.rounded_borders = true;
+        let mut shell = ClientShellConfig::from_config(&enabled);
+        shell.apply_live_config(&Config::default(), &[], &["ui".into()]);
+        assert!(shell.rounded_borders);
+        let mut invalid_bounds = Config::default();
+        invalid_bounds.ui.sidebar_min_width = 80;
+        invalid_bounds.ui.sidebar_max_width = 20;
+        assert!(!shell
+            .apply_live_config(&invalid_bounds, &[], &[])
+            .is_empty());
+        assert!(shell.rounded_borders);
+    }
 
     #[test]
     fn live_reload_applies_client_owned_sections() {

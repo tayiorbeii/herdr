@@ -976,6 +976,12 @@
           "description": "Draw borders along the outside edge of the pane area. Disable with pane gaps disabled for tmux-style internal splitters without an outside frame."
         },
         {
+          "key": "ui.rounded_borders",
+          "type": "boolean",
+          "default": "false",
+          "description": "Round light corners of existing client interface frames without changing geometry or adding borders. Shared junctions and double/heavy glyphs remain square."
+        },
+        {
           "key": "ui.pane_scrollbars",
           "type": "boolean",
           "default": "true",
