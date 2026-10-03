@@ -869,6 +869,14 @@ mod tests {
             changes(1, false, |_| {}).is_empty(),
             "lone auto pane stays unframed"
         );
+        let lone_always = changes(1, false, |config| {
+            config.ui.pane_borders = crate::config::PaneBordersConfig::Always
+        });
+        assert_eq!(
+            corners(&lone_always),
+            "╭╮╯╰",
+            "lone pane framed by pane_borders=always rounds its four corners"
+        );
         assert!(
             changes(2, false, |config| config.ui.pane_outer_borders = false).is_empty(),
             "outer borders off leaves only a straight divider"
