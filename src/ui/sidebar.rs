@@ -7,7 +7,8 @@ use ratatui::{
 };
 
 pub(crate) use self::tokens::{
-    agent_rows as sidebar_agent_rows, space_rows as sidebar_space_rows, AgentTokenContext,
+    agent_row as sidebar_agent_row, agent_rows as sidebar_agent_rows,
+    separator as sidebar_token_separator, space_rows as sidebar_space_rows, AgentTokenContext,
     ResolvedToken, ResolvedTokenKind, SpaceTokenContext,
 };
 use super::text::{display_width, truncate_end};
@@ -274,7 +275,10 @@ pub(crate) fn resolved_token_spans(
     spans
 }
 
-fn apply_token_style(mut style: Style, patch: crate::config::SidebarTokenStyle) -> Style {
+pub(crate) fn apply_token_style(
+    mut style: Style,
+    patch: crate::config::SidebarTokenStyle,
+) -> Style {
     if let Some(foreground) = patch.fg {
         style = style.fg(foreground.ratatui());
     }

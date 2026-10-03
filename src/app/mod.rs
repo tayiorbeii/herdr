@@ -492,6 +492,8 @@ impl App {
             pane_scrollbars: config.ui.pane_scrollbars,
             pane_gaps: config.ui.pane_gaps,
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
+            pane_title_tokens: config.ui.pane_title_tokens.clone(),
+            pane_manual_label_first: config.ui.pane_manual_label_first,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: String::new(),
             reveal_hidden_cursor_for_cjk_ime: config.experimental.reveal_hidden_cursor_for_cjk_ime,
@@ -842,6 +844,8 @@ impl App {
                 self.state.pane_gaps = config.ui.pane_gaps;
                 self.state.show_agent_labels_on_pane_borders =
                     config.ui.show_agent_labels_on_pane_borders;
+                self.state.pane_title_tokens = config.ui.pane_title_tokens.clone();
+                self.state.pane_manual_label_first = config.ui.pane_manual_label_first;
                 self.configure_tab_bar_status(
                     &config.ui.tab_bar_right,
                     &config.ui.tab_bar_right_separator,
@@ -1769,6 +1773,34 @@ mod tests {
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_config_applies_and_removes_pane_title_tokens() {
+        let mut app = test_app();
+        assert_eq!(app.state.pane_title_tokens, None);
+        assert!(!app.state.pane_manual_label_first);
+
+        let config: Config =
+            toml::from_str("[ui]\npane_title_tokens = [\"$task\"]\npane_manual_label_first = true")
+                .unwrap();
+        let report = app.apply_live_config(&config, &[], &[], false);
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert_eq!(
+            app.state.pane_title_tokens,
+            Some(vec![crate::config::AgentSidebarToken::Custom(
+                "task".into()
+            )])
+        );
+        assert!(app.state.pane_manual_label_first);
+
+        // An invalid [ui] section keeps the previous settings.
+        app.apply_live_config(&Config::default(), &[], &["ui".into()], false);
+        assert!(app.state.pane_title_tokens.is_some());
+
+        app.apply_live_config(&Config::default(), &[], &[], false);
+        assert_eq!(app.state.pane_title_tokens, None);
+        assert!(!app.state.pane_manual_label_first);
     }
 
     #[test]

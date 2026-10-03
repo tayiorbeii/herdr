@@ -306,6 +306,13 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Show detected/reported agent labels in split pane borders when no manual pane name is set.
 # show_agent_labels_on_pane_borders = false
 
+# Compose pane border titles from one token row, written like one entry of
+# ui.sidebar.agents.rows. Missing tokens fall back to the plain title.
+# pane_title_tokens = ["tab", { token = "$task", fg = "#f38ba8" }]
+
+# Let a nonempty manual pane label win over reported titles and title tokens.
+# pane_manual_label_first = false
+
 # Hide the tab row when a workspace has exactly one tab.
 # New tabs can still be created with the configured keybinding.
 # hide_tab_bar_when_single_tab = false

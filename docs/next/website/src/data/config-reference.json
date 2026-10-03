@@ -994,6 +994,18 @@
           "description": "Show agent labels in split pane borders when no manual pane label is set."
         },
         {
+          "key": "ui.pane_title_tokens",
+          "type": "token row",
+          "default": "unset",
+          "description": "Compose pane border titles from one row in the same format as ui.sidebar.agents.rows entries (token strings or { token, fg, bold, dim, rules } tables). Supports workspace, tab, pane, agent, terminal_title, terminal_title_stripped and $name pane metadata tokens; state_icon, state_text and machine resolve as missing. Missing tokens are skipped; when no text remains the plain title is used. Unset keeps the plain title."
+        },
+        {
+          "key": "ui.pane_manual_label_first",
+          "type": "boolean",
+          "default": "false",
+          "description": "Let a nonempty manual pane label take priority over reported titles and ui.pane_title_tokens. By default a reported title wins over the manual label."
+        },
+        {
           "key": "ui.hide_tab_bar_when_single_tab",
           "type": "boolean",
           "default": "false",

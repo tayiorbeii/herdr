@@ -309,6 +309,8 @@ text = "#cdd6f4"
 
 `ui.pane_borders` は `"auto"`（デフォルト。分割ペインだけに境界線を表示）、`"always"`（単独ペインにも枠を表示）、`"off"` を受け付けます。単独ペインの辺はすべて外側の辺なので、枠を表示するには `ui.pane_outer_borders = true` も必要です。従来の真偽値も有効で、`true` は `"auto"`、`false` は `"off"` に対応します。
 
+`[ui]` で `pane_title_tokens` を設定すると、`ui.sidebar.agents.rows` と同じトークン行の形式でペイン境界線のタイトルを組み立てられます（例: `pane_title_tokens = ["tab", { token = "$task", fg = "#f38ba8" }]`）。テキストの組み込みトークン（`workspace`、`tab`、`pane`、`agent`、`terminal_title`、`terminal_title_stripped`）と `$name` のペインメタデータトークンに対応します。`state_icon`、`state_text`、`machine` はタイトルでは値なしとして扱われます。トークンは `herdr pane report-metadata` による更新、クリア、TTL の期限切れに合わせてすぐに反映されます。値のないトークンは省略され、テキストが残らない場合は報告されたタイトル、手動ラベル、`show_agent_labels_on_pane_borders` が有効な場合のエージェントラベルの順に使われます。トークンの色は境界線タイトルの色より優先され、フォーカス中のペインでは太字が追加されます。タイトルはペイン幅に合わせて `…` で切り詰められます。`pane_manual_label_first = true` を設定すると、空でない手動ラベルが報告されたタイトルとトークンより優先されます。単独ペインにタイトルを表示するには `pane_borders = "always"` を使います。
+
 `[ui]` の `tab_bar_position = "bottom"` を設定すると、デスクトップのタブ行をターミナルペインの下に配置できます。Prefix、Navigate、Copy、Resize の各モードバーは、表示中だけ下部のタブ行を置き換えます。デフォルトは `"top"` です。
 
 タブ行の右端に、tmux のような順序付きステータス領域を設定できます:

@@ -309,6 +309,8 @@ text = "#cdd6f4"
 
 `ui.pane_borders` 接受 `"auto"`（默认值，仅为分割窗格显示边框）、`"always"`（也为单个窗格显示边框）或 `"off"`。单窗格的所有边都是外边，因此还需要 `ui.pane_outer_borders = true` 才会显示边框。旧的布尔值仍然有效：`true` 对应 `"auto"`，`false` 对应 `"off"`。
 
+在 `[ui]` 下设置 `pane_title_tokens`，可使用与 `ui.sidebar.agents.rows` 相同的令牌行格式组成窗格边框标题，例如 `pane_title_tokens = ["tab", { token = "$task", fg = "#f38ba8" }]`。支持文本内置令牌（`workspace`、`tab`、`pane`、`agent`、`terminal_title`、`terminal_title_stripped`）和 `$name` 窗格元数据令牌；`state_icon`、`state_text` 和 `machine` 在标题中视为缺失。令牌会随 `herdr pane report-metadata` 的更新、清除和 TTL 过期实时刷新。缺失的令牌会被跳过；如果没有剩余文本，标题依次回退到上报的标题、手动标签，以及启用 `show_agent_labels_on_pane_borders` 时的代理标签。令牌颜色优先于边框标题颜色，聚焦窗格会额外加粗。标题按窗格宽度用 `…` 截断。设置 `pane_manual_label_first = true` 可让非空的手动窗格标签优先于上报的标题和令牌。要在单个窗格上显示标题，请使用 `pane_borders = "always"`。
+
 在 `[ui]` 下设置 `tab_bar_position = "bottom"`，可将桌面标签栏放到终端窗格下方。Prefix、Navigate、Copy 和 Resize 模式栏会在显示期间临时替换底部标签栏。默认值为 `"top"`。
 
 可在标签栏右侧配置一个类似 tmux 的有序状态区：
