@@ -59,6 +59,8 @@ run your agents, split panes, walk away. `ctrl+b q` detaches, `herdr` reattaches
 
 everything lives at [herdr.dev/docs](https://herdr.dev/docs/): [quick start](https://herdr.dev/docs/quick-start/) · [concepts](https://herdr.dev/docs/concepts/) · [supported agents](https://herdr.dev/docs/agents/) · [keyboard](https://herdr.dev/docs/keyboard/) · [configuration](https://herdr.dev/docs/configuration/) · [session state](https://herdr.dev/docs/session-state/) · [connecting machines](https://herdr.dev/docs/connecting-machines/) · [remote](https://herdr.dev/docs/persistence-remote/) · [integrations](https://herdr.dev/docs/integrations/) · [add herdr support to your agent](https://herdr.dev/docs/add-herdr-support/) · [plugins](https://herdr.dev/docs/plugins/) · [socket api](https://herdr.dev/docs/socket-api/)
 
+Customize terminal popups with optional `popup_bg` and `popup_border` under `[theme.custom]` (or its `light`/`dark` subtables with `auto_switch`). Omitted colors keep the existing popup look; explicit program backgrounds inside the popup are kept. See [configuration](https://herdr.dev/docs/configuration/).
+
 ## thanks
 
 every past sponsor and backer is listed in [SPONSORS.md](./SPONSORS.md) — thank you 🐑

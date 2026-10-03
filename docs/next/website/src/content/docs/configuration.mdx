@@ -276,6 +276,8 @@ You can override individual colors:
 ```toml
 [theme.custom]
 sidebar_bg = "#181825"
+popup_bg = "#181825"
+popup_border = "#89b4fa"
 active_row_bg = "#1e1e2e"
 selection_bg = "#313244"
 panel_bg = "reset"
@@ -288,6 +290,8 @@ yellow = "#f9e2af"
 
 `sidebar_bg` optionally gives the desktop sidebar its own background. When omitted, the sidebar keeps the host terminal background. `active_row_bg` changes the active Space and focused Agent row background without affecting separators or scrollbar tracks. `selection_bg` changes the Navigate-mode cursor row background in the sidebar.
 
+`popup_bg` and `popup_border` style terminal popups opened by popup commands or plugin panes with `placement = "popup"`. `popup_bg` paints blank popup cells and popup terminal cells that use the default background; backgrounds the program sets explicitly are kept. `popup_border` colors the popup border and its title. If omitted, the popup frame keeps the resolved `panel_bg` background and `accent` border, and popup terminal cells keep the terminal default background. Reset aliases explicitly use terminal defaults; they do not mean inheritance. Panes, tabs, overlays and other `accent` uses are unchanged.
+
 Color values accept hex, named colors, `rgb(r,g,b)`, or reset aliases like `reset`, `default`, `none`, and `transparent`.
 
 When `auto_switch` is enabled, optional light and dark subtables layer on top of the shared custom colors:
@@ -297,15 +301,17 @@ When `auto_switch` is enabled, optional light and dark subtables layer on top of
 accent = "#89b4fa"
 
 [theme.custom.light]
+popup_border = "#1e66f5"
 panel_bg = "#eff1f5"
 text = "#4c4f69"
 
 [theme.custom.dark]
+popup_border = "#89b4fa"
 panel_bg = "#1e1e2e"
 text = "#cdd6f4"
 ```
 
-The active palette is applied in this order: built-in theme, `[theme.custom]`, then `[theme.custom.light]` or `[theme.custom.dark]`. Omitting the mode subtables preserves the existing shared override behavior.
+The active palette is applied in this order: built-in theme, `[theme.custom]`, then `[theme.custom.light]` or `[theme.custom.dark]`. Omitting the mode subtables preserves the existing shared override behavior. Omitting a mode popup field inherits its common value. Initial load, live config reload, and host appearance changes use the same resolution, and removing a popup override on reload restores the default popup colors.
 
 ## UI and sidebar
 

@@ -567,11 +567,18 @@ impl ClientShellState {
             {
                 occlusion.start_popup(geometry.outer);
                 let mut composed = frame.to_ratatui_buffer()?;
+                let palette = &self.config.palette;
                 let block = ratatui::widgets::Block::default()
                     .borders(ratatui::widgets::Borders::ALL)
-                    .border_style(ratatui::style::Style::default().fg(self.config.palette.accent))
+                    .border_style(
+                        ratatui::style::Style::default()
+                            .fg(palette.popup_border.unwrap_or(palette.accent)),
+                    )
                     .title(popup.title.clone())
-                    .style(ratatui::style::Style::default().bg(self.config.palette.panel_bg));
+                    .style(
+                        ratatui::style::Style::default()
+                            .bg(palette.popup_bg.unwrap_or(palette.panel_bg)),
+                    );
                 ratatui::widgets::Widget::render(
                     ratatui::widgets::Clear,
                     geometry.outer,
@@ -580,6 +587,9 @@ impl ClientShellState {
                 ratatui::widgets::Widget::render(block, geometry.outer, &mut composed);
                 frame.replace_from_ratatui_buffer_preserving_effects(&composed, None);
                 blit_pane_surface(&mut frame, &popup.frame, geometry.inner);
+                if let Some(popup_bg) = self.config.palette.popup_bg {
+                    fill_default_background(&mut frame, &popup.frame, geometry.inner, popup_bg);
+                }
                 self.hits.popup = Some(PaneHit {
                     rect: geometry.outer,
                     inner_rect: geometry.inner,

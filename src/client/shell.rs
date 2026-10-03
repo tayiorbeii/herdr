@@ -279,5 +279,28 @@ fn blit_pane_surface(target: &mut FrameData, source: &FrameData, area: Rect) {
     target.graphics.clear();
 }
 
+/// Repaint blitted cells whose background is the terminal default (Reset). Explicit child
+/// backgrounds arrive as indexed or RGB colors and are left untouched.
+fn fill_default_background(
+    target: &mut FrameData,
+    source: &FrameData,
+    area: Rect,
+    bg: ratatui::style::Color,
+) {
+    let default_bg = crate::protocol::color_to_u32(ratatui::style::Color::Reset);
+    let bg = crate::protocol::color_to_u32(bg);
+    let copy_width = source.width.min(area.width);
+    let copy_height = source.height.min(area.height);
+    for row in area.y..area.y + copy_height {
+        let start = row as usize * target.width as usize + area.x as usize;
+        let Some(cells) = target.cells.get_mut(start..start + copy_width as usize) else {
+            continue;
+        };
+        for cell in cells.iter_mut().filter(|cell| cell.bg == default_bg) {
+            cell.bg = bg;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests;

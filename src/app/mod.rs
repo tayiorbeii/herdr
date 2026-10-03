@@ -1356,6 +1356,48 @@ mod tests {
     }
 
     #[test]
+    fn popup_colors_follow_common_legacy_accent_and_selected_mode() {
+        use crate::terminal_theme::HostAppearance;
+        use ratatui::style::Color;
+
+        let mut config: Config = toml::from_str(
+            r##"
+[ui]
+accent = "red"
+[theme]
+name = "terminal"
+auto_switch = true
+[theme.custom]
+popup_bg = "blue"
+[theme.custom.light]
+accent = "yellow"
+popup_border = "green"
+[theme.custom.dark]
+popup_bg = "reset"
+"##,
+        )
+        .unwrap();
+        let runtime = client_theme_runtime_from_config(&config);
+        let dark = client_palette_from_config(&config);
+        assert_eq!(dark.popup_bg, Some(Color::Reset));
+        assert_eq!(dark.popup_border, None);
+        assert_eq!(dark.accent, Color::Red);
+        let light = client_palette_for_appearance(&runtime, HostAppearance::Light);
+        assert_eq!(light.popup_bg, Some(Color::Blue));
+        assert_eq!(light.popup_border, Some(Color::Green));
+        assert_eq!(light.accent, Color::Yellow);
+
+        config.theme.auto_switch = false;
+        let runtime = client_theme_runtime_from_config(&config);
+        for appearance in [HostAppearance::Light, HostAppearance::Dark] {
+            let manual = client_palette_for_appearance(&runtime, appearance);
+            assert_eq!(manual.popup_bg, Some(Color::Blue));
+            assert_eq!(manual.popup_border, None);
+            assert_eq!(manual.accent, Color::Red);
+        }
+    }
+
+    #[test]
     fn theme_auto_switch_is_opt_in_and_preserves_manual_default() {
         let mut config = Config::default();
         config.theme.name = Some("tokyo-night".to_string());

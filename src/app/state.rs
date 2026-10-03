@@ -35,6 +35,10 @@ use crate::workspace::Workspace;
 pub struct Palette {
     /// Primary accent (highlight, active borders).
     pub accent: Color,
+    /// Terminal popup overrides. None keeps panel_bg/accent chrome and verbatim PTY cells;
+    /// Some(Reset) is explicit.
+    pub popup_bg: Option<Color>,
+    pub popup_border: Option<Color>,
     /// Background for the tab bar, floating panels, overlays, and modals.
     pub panel_bg: Color,
     /// Optional desktop sidebar background. Reset preserves the terminal background.
@@ -77,6 +81,8 @@ impl Palette {
     /// Catppuccin Mocha — the default.
     pub fn catppuccin() -> Self {
         Self {
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(137, 180, 250), // blue
             panel_bg: Color::Rgb(24, 24, 37),
             sidebar_bg: Color::Reset,
@@ -102,6 +108,8 @@ impl Palette {
     /// Catppuccin Latte — the light Catppuccin flavor.
     pub fn catppuccin_latte() -> Self {
         Self {
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(30, 102, 245),
             panel_bg: Color::Rgb(239, 241, 245),
             sidebar_bg: Color::Reset,
@@ -127,6 +135,8 @@ impl Palette {
     /// Terminal 16-color theme.
     pub fn terminal() -> Self {
         Self {
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Blue,
             panel_bg: Color::Reset,
             sidebar_bg: Color::Reset,
@@ -152,6 +162,8 @@ impl Palette {
     /// Tokyo Night — blue-purple aesthetic.
     pub fn tokyo_night() -> Self {
         Self {
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(122, 162, 247), // blue
             panel_bg: Color::Rgb(26, 27, 38),
             sidebar_bg: Color::Reset,
@@ -177,6 +189,8 @@ impl Palette {
     /// Tokyo Night Day — the light Tokyo Night style.
     pub fn tokyo_night_day() -> Self {
         Self {
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(46, 125, 233),
             panel_bg: Color::Rgb(225, 226, 231),
             sidebar_bg: Color::Reset,
@@ -202,6 +216,8 @@ impl Palette {
     /// Dracula — purple/pink/green.
     pub fn dracula() -> Self {
         Self {
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(189, 147, 249), // purple
             panel_bg: Color::Rgb(40, 42, 54),
             sidebar_bg: Color::Reset,
@@ -227,6 +243,8 @@ impl Palette {
     /// Nord — frosty blue palette.
     pub fn nord() -> Self {
         Self {
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(136, 192, 208), // frost
             panel_bg: Color::Rgb(46, 52, 64),
             sidebar_bg: Color::Reset,
@@ -252,6 +270,8 @@ impl Palette {
     /// Gruvbox Dark — warm retro palette.
     pub fn gruvbox() -> Self {
         Self {
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(215, 153, 33), // yellow
             panel_bg: Color::Rgb(40, 40, 40),
             sidebar_bg: Color::Reset,
@@ -277,6 +297,8 @@ impl Palette {
     /// Gruvbox Light — the light retro palette.
     pub fn gruvbox_light() -> Self {
         Self {
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(7, 102, 120),
             panel_bg: Color::Rgb(251, 241, 199),
             sidebar_bg: Color::Reset,
@@ -302,6 +324,8 @@ impl Palette {
     /// One Dark — Atom's classic dark theme.
     pub fn one_dark() -> Self {
         Self {
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(97, 175, 239), // blue
             panel_bg: Color::Rgb(40, 44, 52),
             sidebar_bg: Color::Reset,
@@ -327,6 +351,8 @@ impl Palette {
     /// One Light — Atom's classic light theme.
     pub fn one_light() -> Self {
         Self {
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(64, 120, 242),
             panel_bg: Color::Rgb(250, 250, 250),
             sidebar_bg: Color::Reset,
@@ -352,6 +378,8 @@ impl Palette {
     /// Solarized Dark — Ethan Schoonover's classic.
     pub fn solarized() -> Self {
         Self {
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(38, 139, 210), // blue
             panel_bg: Color::Rgb(0, 43, 54),
             sidebar_bg: Color::Reset,
@@ -377,6 +405,8 @@ impl Palette {
     /// Solarized Light — Ethan Schoonover's light variant.
     pub fn solarized_light() -> Self {
         Self {
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(38, 139, 210),
             panel_bg: Color::Rgb(253, 246, 227),
             sidebar_bg: Color::Reset,
@@ -402,6 +432,8 @@ impl Palette {
     /// Kanagawa — inspired by Katsushika Hokusai.
     pub fn kanagawa() -> Self {
         Self {
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(126, 156, 216), // blue
             panel_bg: Color::Rgb(31, 31, 40),
             sidebar_bg: Color::Reset,
@@ -427,6 +459,8 @@ impl Palette {
     /// Kanagawa Lotus — the light Kanagawa variant.
     pub fn kanagawa_lotus() -> Self {
         Self {
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(77, 105, 155),
             panel_bg: Color::Rgb(242, 236, 188),
             sidebar_bg: Color::Reset,
@@ -452,6 +486,8 @@ impl Palette {
     /// Rosé Pine — muted, elegant.
     pub fn rose_pine() -> Self {
         Self {
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(196, 167, 231), // iris
             panel_bg: Color::Rgb(25, 23, 36),
             sidebar_bg: Color::Reset,
@@ -477,6 +513,8 @@ impl Palette {
     /// Rosé Pine Dawn — the light Rosé Pine variant.
     pub fn rose_pine_dawn() -> Self {
         Self {
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(144, 122, 169),
             panel_bg: Color::Rgb(250, 244, 237),
             sidebar_bg: Color::Reset,
@@ -502,6 +540,8 @@ impl Palette {
     /// Vesper — minimal high-contrast monochrome with peach and mint accents.
     pub fn vesper() -> Self {
         Self {
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(255, 199, 153),
             panel_bg: Color::Rgb(26, 26, 26),
             sidebar_bg: Color::Reset,
@@ -552,6 +592,12 @@ impl Palette {
     /// Apply custom color overrides on top of this palette.
     pub fn with_overrides(mut self, custom: &crate::config::CustomThemeColors) -> Self {
         use crate::config::parse_color;
+        if let Some(c) = &custom.popup_bg {
+            self.popup_bg = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.popup_border {
+            self.popup_border = Some(parse_color(c));
+        }
         if let Some(c) = &custom.accent {
             self.accent = parse_color(c);
         }
@@ -614,6 +660,12 @@ impl Palette {
 
     pub fn with_mode_overrides(mut self, custom: &crate::config::ModeThemeColors) -> Self {
         use crate::config::parse_color;
+        if let Some(c) = &custom.popup_bg {
+            self.popup_bg = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.popup_border {
+            self.popup_border = Some(parse_color(c));
+        }
         if let Some(c) = &custom.accent {
             self.accent = parse_color(c);
         }
@@ -1386,6 +1438,54 @@ mod tests {
                 "theme should resolve: {name}"
             );
         }
+    }
+
+    #[test]
+    fn built_in_themes_leave_popup_colors_unset() {
+        assert_eq!(crate::config::THEME_NAMES.len(), 18);
+        for name in crate::config::THEME_NAMES {
+            let palette = Palette::from_name(name).unwrap();
+            assert_eq!(palette.popup_bg, None, "theme: {name}");
+            assert_eq!(palette.popup_border, None, "theme: {name}");
+        }
+    }
+
+    #[test]
+    fn popup_mode_overrides_inherit_common_and_preserve_reset() {
+        let common = crate::config::CustomThemeColors {
+            popup_bg: Some("red".into()),
+            popup_border: Some("blue".into()),
+            ..Default::default()
+        };
+        let palette = Palette::catppuccin().with_overrides(&common);
+        assert_eq!(palette.popup_bg, Some(Color::Red));
+        assert_eq!(palette.popup_border, Some(Color::Blue));
+        assert_eq!(palette.accent, Palette::catppuccin().accent);
+        assert_eq!(palette.panel_bg, Palette::catppuccin().panel_bg);
+        for alias in ["reset", "default", "none", "transparent"] {
+            let mode = crate::config::ModeThemeColors {
+                popup_bg: Some(alias.into()),
+                ..Default::default()
+            };
+            let resolved = palette.clone().with_mode_overrides(&mode);
+            assert_eq!(resolved.popup_bg, Some(Color::Reset));
+            assert_eq!(resolved.popup_border, Some(Color::Blue));
+            let mode = crate::config::ModeThemeColors {
+                popup_border: Some(alias.into()),
+                ..Default::default()
+            };
+            let resolved = palette.clone().with_mode_overrides(&mode);
+            assert_eq!(resolved.popup_bg, Some(Color::Red));
+            assert_eq!(resolved.popup_border, Some(Color::Reset));
+        }
+        let invalid = crate::config::CustomThemeColors {
+            popup_bg: Some("not-a-color".into()),
+            popup_border: Some("#zzzzzz".into()),
+            ..Default::default()
+        };
+        let palette = Palette::catppuccin().with_overrides(&invalid);
+        assert_eq!(palette.popup_bg, Some(Color::Cyan));
+        assert_eq!(palette.popup_border, Some(Color::Cyan));
     }
 
     #[test]

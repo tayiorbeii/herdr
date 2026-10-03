@@ -84,6 +84,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Override individual color tokens on top of the base theme.
 # Accepts: hex (#rrggbb), named colors, rgb(r,g,b), or panel_bg = "reset"
 # [theme.custom]
+# Terminal popups only; omitted bg keeps panel_bg chrome and the terminal default
+# inside the popup, omitted border follows accent. Explicit program backgrounds are kept.
+# popup_bg = "#181825"
+# popup_border = "#89b4fa"
 # sidebar_bg = "#181825"
 # active_row_bg = "#1e1e2e"
 # selection_bg = "#313244"
@@ -94,10 +98,12 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 
 # Layer appearance-specific overrides on top when auto_switch is enabled.
 # [theme.custom.light]
+# popup_border = "#1e66f5"
 # panel_bg = "#eff1f5"
 # text = "#4c4f69"
 #
 # [theme.custom.dark]
+# popup_border = "#89b4fa"
 # panel_bg = "#1e1e2e"
 # text = "#cdd6f4"
 

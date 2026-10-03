@@ -101,6 +101,8 @@ impl ThemeConfig {
 #[serde(default)]
 pub struct CustomThemeColors {
     pub accent: Option<String>,
+    pub popup_bg: Option<String>,
+    pub popup_border: Option<String>,
     pub panel_bg: Option<String>,
     pub sidebar_bg: Option<String>,
     pub active_row_bg: Option<String>,
@@ -130,6 +132,8 @@ pub struct CustomThemeColors {
 #[serde(default)]
 pub struct ModeThemeColors {
     pub accent: Option<String>,
+    pub popup_bg: Option<String>,
+    pub popup_border: Option<String>,
     pub panel_bg: Option<String>,
     pub sidebar_bg: Option<String>,
     pub active_row_bg: Option<String>,
@@ -268,6 +272,31 @@ light_name = "lattee"
         for value in ["reset", "default", "none", "transparent"] {
             assert_eq!(parse_color(value), Color::Reset, "value: {value}");
         }
+    }
+
+    #[test]
+    fn popup_color_fields_parse_in_common_and_modes() {
+        let config: Config = toml::from_str(
+            r##"
+[theme.custom]
+popup_bg = "#123456"
+popup_border = "reset"
+[theme.custom.light]
+popup_bg = "blue"
+[theme.custom.dark]
+popup_border = "transparent"
+"##,
+        )
+        .unwrap();
+        let custom = config.theme.custom.unwrap();
+        assert_eq!(custom.popup_bg.as_deref(), Some("#123456"));
+        assert_eq!(custom.popup_border.as_deref(), Some("reset"));
+        let light = custom.light.unwrap();
+        assert_eq!(light.popup_bg.as_deref(), Some("blue"));
+        assert!(light.popup_border.is_none());
+        let dark = custom.dark.unwrap();
+        assert!(dark.popup_bg.is_none());
+        assert_eq!(dark.popup_border.as_deref(), Some("transparent"));
     }
 
     #[test]
