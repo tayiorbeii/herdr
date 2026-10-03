@@ -311,6 +311,8 @@ text = "#cdd6f4"
 
 `[ui]` で `pane_title_tokens` を設定すると、`ui.sidebar.agents.rows` と同じトークン行の形式でペイン境界線のタイトルを組み立てられます（例: `pane_title_tokens = ["tab", { token = "$task", fg = "#f38ba8" }]`）。テキストの組み込みトークン（`workspace`、`tab`、`pane`、`agent`、`terminal_title`、`terminal_title_stripped`）と `$name` のペインメタデータトークンに対応します。`state_icon`、`state_text`、`machine` はタイトルでは値なしとして扱われます。トークンは `herdr pane report-metadata` による更新、クリア、TTL の期限切れに合わせてすぐに反映されます。値のないトークンは省略され、テキストが残らない場合は報告されたタイトル、手動ラベル、`show_agent_labels_on_pane_borders` が有効な場合のエージェントラベルの順に使われます。トークンの色は境界線タイトルの色より優先され、フォーカス中のペインでは太字が追加されます。タイトルはペイン幅に合わせて `…` で切り詰められます。`pane_manual_label_first = true` を設定すると、空でない手動ラベルが報告されたタイトルとトークンより優先されます。単独ペインにタイトルを表示するには `pane_borders = "always"` を使います。
 
+`[ui]` で `pane_border_identity_token` を設定すると、`ui.sidebar.agents.rows` のエントリと同じ形式の 1 つのトークンから、フォーカスされていないペインの境界線の色を決められます（例: `pane_border_identity_token = { token = "$role", rules = [{ equals = "review", fg = "#f9e2af" }, { equals = "build", fg = "#a6e3a1" }] }` と `herdr pane report-metadata <pane_id> --source ID --token role=build`）。トークンがテキストに解決され、そのスタイルに `fg` がある場合、その色がペインの非アクティブな境界線に使われます。トークンがない、クリアされた、期限切れ、または `fg` がない場合は通常の非アクティブな境界線の色のままです。フォーカス中のペインは常にアクセント色を保ち、フォーカスされていないペインだけが共有する仕切りや交点は、共有するすべてのペインの色が同じ場合にのみその色になります。タイトルとペインの背景は変わりません。他のペイン境界線の設定と同様に、サーバー側の設定が使われます。
+
 `[ui]` の `tab_bar_position = "bottom"` を設定すると、デスクトップのタブ行をターミナルペインの下に配置できます。Prefix、Navigate、Copy、Resize の各モードバーは、表示中だけ下部のタブ行を置き換えます。デフォルトは `"top"` です。
 
 タブ行の右端に、tmux のような順序付きステータス領域を設定できます:

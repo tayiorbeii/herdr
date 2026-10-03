@@ -1006,6 +1006,12 @@
           "description": "Let a nonempty manual pane label take priority over reported titles and ui.pane_title_tokens. By default a reported title wins over the manual label."
         },
         {
+          "key": "ui.pane_border_identity_token",
+          "type": "token",
+          "default": "unset",
+          "description": "Color the frame lines of unfocused panes from one token in the same format as a ui.sidebar.agents.rows entry (a token string or { token, fg, bold, dim, rules } table), for example { token = \"$role\", fg = \"#89b4fa\" }. When the token resolves to text and its style (after rules) has an fg, that color is used for the pane's inactive lines; otherwise the normal inactive border color is kept. The focused pane keeps the accent color. A divider or junction shared only by unfocused panes uses an identity color only when every pane that shares it has the same one. Unset keeps the existing border colors."
+        },
+        {
           "key": "ui.hide_tab_bar_when_single_tab",
           "type": "boolean",
           "default": "false",
