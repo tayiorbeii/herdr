@@ -307,6 +307,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # so focus stays visible without color. Geometry and shared dividers are unchanged.
 # pane_focus_weight = false
 
+# Draw every pane border with heavy line glyphs. With pane_focus_weight = true, the
+# focused pane uses double lines instead so it still stands out.
+# pane_heavy_borders = false
+
 # Show detected/reported agent labels in split pane borders when no manual pane name is set.
 # show_agent_labels_on_pane_borders = false
 

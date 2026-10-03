@@ -748,9 +748,16 @@ mod tests {
     fn focus_weight_app(pane_focus_weight: bool) -> (crate::app::App, [crate::layout::PaneId; 2]) {
         let mut config = crate::config::Config::default();
         config.ui.pane_focus_weight = pane_focus_weight;
+        split_shell_app(&config)
+    }
+
+    /// Two side-by-side panes, left focused, from a real `App::new(config)`.
+    fn split_shell_app(
+        config: &crate::config::Config,
+    ) -> (crate::app::App, [crate::layout::PaneId; 2]) {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = crate::app::App::new(
-            &config,
+            config,
             crate::app::AppPolicy::TEST,
             None,
             api_rx,
@@ -922,5 +929,81 @@ mod tests {
         assert_glyph_only_surface_change(&plain, &surface);
         assert_eq!(surface_corner(&plain, 0), "┌");
         assert_eq!(surface_corner(&surface, 0), "┏");
+    }
+
+    fn heavy_borders_app(
+        pane_heavy_borders: bool,
+        pane_focus_weight: bool,
+    ) -> (crate::app::App, [crate::layout::PaneId; 2]) {
+        let mut config = crate::config::Config::default();
+        config.ui.pane_heavy_borders = pane_heavy_borders;
+        config.ui.pane_focus_weight = pane_focus_weight;
+        let (app, panes) = split_shell_app(&config);
+        // The option reaches the renderer through `App::new` like `pane_gaps`.
+        assert_eq!(app.state.pane_heavy_borders, pane_heavy_borders);
+        (app, panes)
+    }
+
+    #[test]
+    fn pane_heavy_borders_keep_geometry_and_follow_focus() {
+        let (mut plain_app, _) = heavy_borders_app(false, false);
+        let plain = focus_weight_surface(&mut plain_app);
+        for focus_weight in [false, true] {
+            let (mut app, [left, right]) = heavy_borders_app(true, focus_weight);
+            let surface = focus_weight_surface(&mut app);
+            assert_glyph_only_surface_change(&plain, &surface);
+            let public_left = app.public_pane_id(0, left).unwrap();
+            let left_at = surface
+                .panes
+                .iter()
+                .position(|pane| pane.pane_id == public_left)
+                .unwrap();
+            let right_at = 1 - left_at;
+            let focused_corner = if focus_weight { "╔" } else { "┏" };
+            assert_eq!(surface_corner(&plain, left_at), "┌");
+            assert_eq!(surface_corner(&surface, left_at), focused_corner);
+            assert_eq!(surface_corner(&surface, right_at), "┏");
+
+            app.handle_api_request(crate::api::schema::Request {
+                id: "keyboard".into(),
+                method: crate::api::schema::Method::PaneFocusDirection(
+                    crate::api::schema::PaneFocusDirectionParams {
+                        pane_id: app.public_pane_id(0, left),
+                        direction: crate::api::schema::PaneDirection::Right,
+                    },
+                ),
+            });
+            assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(right));
+            let surface = focus_weight_surface(&mut app);
+            assert_eq!(surface_corner(&surface, left_at), "┏");
+            assert_eq!(surface_corner(&surface, right_at), focused_corner);
+            assert_eq!(
+                anonymous_panes(&surface),
+                anonymous_panes(&plain)
+                    .into_iter()
+                    .map(|mut pane| {
+                        pane.focused = !pane.focused;
+                        pane
+                    })
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(surface.splits, plain.splits);
+        }
+    }
+
+    #[test]
+    fn pane_heavy_borders_zoomed_pane() {
+        let (mut plain_app, _) = heavy_borders_app(false, false);
+        plain_app.state.workspaces[0].tabs[0].zoomed = true;
+        let plain = focus_weight_surface(&mut plain_app);
+        for (focus_weight, corner) in [(false, "┏"), (true, "╔")] {
+            let (mut app, _) = heavy_borders_app(true, focus_weight);
+            app.state.workspaces[0].tabs[0].zoomed = true;
+            let surface = focus_weight_surface(&mut app);
+            assert_eq!(surface.panes.len(), 1);
+            assert_glyph_only_surface_change(&plain, &surface);
+            assert_eq!(surface_corner(&plain, 0), "┌");
+            assert_eq!(surface_corner(&surface, 0), corner);
+        }
     }
 }

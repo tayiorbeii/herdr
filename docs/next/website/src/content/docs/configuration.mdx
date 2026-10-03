@@ -315,6 +315,8 @@ The sidebar is the main Herdr dashboard. Search `ui.` in the [Config reference](
 
 Set `pane_focus_weight = true` under `[ui]` to draw the focused pane's border with heavy line glyphs in addition to its accent color, so focus is recognizable without relying on color. The default is `false`, which keeps the existing appearance. Shared dividers stay shared: the segments along the focused pane become heavy and junctions keep every arm. Pane sizes, dividers and click targets do not change. The cue needs visible borders; it has no effect with `pane_borders = "off"`.
 
+Set `pane_heavy_borders = true` under `[ui]` to draw every pane border with heavy line glyphs. The default is `false`, which keeps light lines. The focused pane still uses its accent color. When `pane_focus_weight = true` is also set, the focused pane switches to double line glyphs so it stays distinct from the heavy frames around it. Unicode has no glyphs that mix heavy and double lines, so a junction that touches the focused frame is drawn entirely in double lines and keeps all of its arms. Popups and panels are not affected. Pane sizes, dividers and click targets do not change.
+
 Set `tab_bar_position = "bottom"` under `[ui]` to place the desktop tab row below the terminal panes. Prefix, Navigate, Copy, and Resize mode bars temporarily replace the bottom tab row while active. The default is `"top"`.
 
 Configure an ordered tmux-style status area at the right edge of the tab row:

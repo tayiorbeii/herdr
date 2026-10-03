@@ -994,6 +994,12 @@
           "description": "Draw the focused pane's border with heavy line glyphs in addition to its accent color, so focus is visible without relying on color. Geometry, dividers and junctions are unchanged."
         },
         {
+          "key": "ui.pane_heavy_borders",
+          "type": "boolean",
+          "default": "false",
+          "description": "Draw every pane border with heavy line glyphs. With ui.pane_focus_weight, the focused pane uses double line glyphs instead; junctions touching it are drawn in double. Popups, panels and geometry are unchanged."
+        },
+        {
           "key": "ui.show_agent_labels_on_pane_borders",
           "type": "boolean",
           "default": "false",

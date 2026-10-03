@@ -501,11 +501,18 @@ fn render_pane_borders(
         let focused = pane_infos
             .iter()
             .any(|info| info.is_focused && line_touches_pane(x, y, info, app.pane_gaps));
-        let symbol = match focus_frame {
-            Some(focus_frame) => {
-                weighted_line_cell_symbol(line, focus_frame.arm_weights(x, y, LineWeight::Heavy))
-            }
-            None => line_cell_symbol(line),
+        // With heavy borders on, the focus cue steps up from heavy to double.
+        let symbol = match (focus_frame, app.pane_heavy_borders) {
+            (Some(focus_frame), false) => weighted_line_cell_symbol(
+                line,
+                focus_frame.arm_weights(x, y, LineWeight::Light, LineWeight::Heavy),
+            ),
+            (Some(focus_frame), true) => weighted_line_cell_symbol(
+                line,
+                focus_frame.arm_weights(x, y, LineWeight::Heavy, LineWeight::Double),
+            ),
+            (None, true) => weighted_line_cell_symbol(line, LineWeights::all(LineWeight::Heavy)),
+            (None, false) => line_cell_symbol(line),
         };
         if symbol.is_empty() {
             continue;
@@ -720,12 +727,14 @@ fn line_cell_symbol(line: LineCell) -> &'static str {
 }
 
 /// Glyph family of one border arm. Arms of a cell may differ; Unicode box
-/// drawing has a glyph for every light/heavy combination.
+/// drawing has a glyph for every light/heavy combination. Double has no
+/// heavy mixes, so a cell with any double arm is drawn entirely double.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum LineWeight {
     #[default]
     Light,
     Heavy,
+    Double,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -734,6 +743,17 @@ struct LineWeights {
     down: LineWeight,
     left: LineWeight,
     right: LineWeight,
+}
+
+impl LineWeights {
+    fn all(weight: LineWeight) -> Self {
+        Self {
+            up: weight,
+            down: weight,
+            left: weight,
+            right: weight,
+        }
+    }
 }
 
 /// Border rectangle owned by the focused pane: its own frame plus, without
@@ -784,14 +804,8 @@ impl FocusFrame {
     }
 
     /// Both halves of a segment agree, so merged junctions stay connected.
-    fn arm_weights(&self, x: u16, y: u16, emphasis: LineWeight) -> LineWeights {
-        let weight = |owned: bool| {
-            if owned {
-                emphasis
-            } else {
-                LineWeight::Light
-            }
-        };
+    fn arm_weights(&self, x: u16, y: u16, base: LineWeight, emphasis: LineWeight) -> LineWeights {
+        let weight = |owned: bool| if owned { emphasis } else { base };
         LineWeights {
             up: weight(y.checked_sub(1).is_some_and(|y| self.owns_vertical(x, y))),
             down: weight(self.owns_vertical(x, y)),
@@ -816,11 +830,21 @@ const WEIGHTED_LINE_SYMBOLS: [[&str; 9]; 9] = [
 ];
 
 fn weighted_line_cell_symbol(line: LineCell, weights: LineWeights) -> &'static str {
+    // Unicode has no heavy/double mixes, so any present double arm draws the
+    // whole cell double. Every arm stays drawn, and the focused frame stays a
+    // closed double outline through its junctions.
+    let double = (line.up && weights.up == LineWeight::Double)
+        || (line.down && weights.down == LineWeight::Double)
+        || (line.left && weights.left == LineWeight::Double)
+        || (line.right && weights.right == LineWeight::Double);
+    if double {
+        return double_line_cell_symbol(line);
+    }
     let arm = |present: bool, weight: LineWeight| -> u8 {
         match (present, weight) {
             (false, _) => 0,
             (true, LineWeight::Light) => 1,
-            (true, LineWeight::Heavy) => 2,
+            (true, LineWeight::Heavy | LineWeight::Double) => 2,
         }
     };
     let mut up = arm(line.up, weights.up);
@@ -834,6 +858,28 @@ fn weighted_line_cell_symbol(line: LineCell, weights: LineWeights) -> &'static s
         _ => {}
     }
     WEIGHTED_LINE_SYMBOLS[usize::from(up * 3 + down)][usize::from(left * 3 + right)]
+}
+
+/// Double counterpart of `line_cell_symbol`, including its lone-arm lines.
+fn double_line_cell_symbol(line: LineCell) -> &'static str {
+    match (line.up, line.down, line.left, line.right) {
+        (true, true, true, true) => "╬",
+        (true, true, true, false) => "╣",
+        (true, true, false, true) => "╠",
+        (true, false, true, true) => "╩",
+        (false, true, true, true) => "╦",
+        (true, true, false, false) | (true, false, false, false) | (false, true, false, false) => {
+            "║"
+        }
+        (false, false, true, true) | (false, false, true, false) | (false, false, false, true) => {
+            "═"
+        }
+        (false, true, false, true) => "╔",
+        (false, true, true, false) => "╗",
+        (true, false, false, true) => "╚",
+        (true, false, true, false) => "╝",
+        _ => "",
+    }
 }
 
 pub(crate) fn render_selection_highlight<P: PartialEq>(
@@ -2136,5 +2182,417 @@ mod tests {
         assert_eq!(title.symbol(), "a");
         assert_eq!(title.style().fg, Some(app.palette.accent));
         assert!(title.style().add_modifier.contains(Modifier::BOLD));
+    }
+
+    fn line_cell_from_bits(bits: u8) -> LineCell {
+        LineCell {
+            up: bits & 8 != 0,
+            down: bits & 4 != 0,
+            left: bits & 2 != 0,
+            right: bits & 1 != 0,
+        }
+    }
+
+    /// Arm weights of any pane glyph: 0 absent, 1 light, 2 heavy, 3 double.
+    fn glyph_arms(symbol: &str) -> Option<[u8; 4]> {
+        if let Some(arms) = weighted_arms(symbol) {
+            return Some(arms);
+        }
+        // Prefer the two-arm reading of the double straight lines.
+        (0..16u8).rev().find_map(|bits| {
+            let line = line_cell_from_bits(bits);
+            (!symbol.is_empty() && double_line_cell_symbol(line) == symbol)
+                .then(|| [line.up, line.down, line.left, line.right].map(|arm| u8::from(arm) * 3))
+        })
+    }
+
+    /// The single family of every present arm, or `None` for mixed or non-line cells.
+    fn uniform_weight(symbol: &str) -> Option<u8> {
+        let arms = glyph_arms(symbol)?;
+        let mut present = arms.into_iter().filter(|&weight| weight > 0);
+        let first = present.next()?;
+        present.all(|weight| weight == first).then_some(first)
+    }
+
+    fn render_heavy_borders(
+        app: &mut AppState,
+        workspace: &Workspace,
+        area: Rect,
+        heavy: bool,
+        focus_weight: bool,
+    ) -> Buffer {
+        app.pane_heavy_borders = heavy;
+        app.pane_focus_weight = focus_weight;
+        render_layout_borders(app, workspace, area)
+    }
+
+    fn cells_where(buffer: &Buffer, keep: impl Fn(&str) -> bool) -> Vec<(u16, u16)> {
+        let mut cells = Vec::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                if keep(buffer[(x, y)].symbol()) {
+                    cells.push((x, y));
+                }
+            }
+        }
+        cells
+    }
+
+    /// `on` differs from the plain light render only by glyph family: same
+    /// styles, same arms, and every line cell is wholly heavy or wholly double.
+    fn assert_family_only_changes(plain: &Buffer, on: &Buffer) {
+        assert_eq!(plain.area, on.area);
+        for y in 0..plain.area.height {
+            for x in 0..plain.area.width {
+                let (before, after) = (&plain[(x, y)], &on[(x, y)]);
+                assert_eq!(before.style(), after.style(), "style changed at ({x}, {y})");
+                let Some(arms_before) = weighted_arms(before.symbol()) else {
+                    assert_eq!(before.symbol(), after.symbol(), "non-line at ({x}, {y})");
+                    continue;
+                };
+                let arms_after = glyph_arms(after.symbol()).expect("line glyph");
+                assert_eq!(
+                    arms_before.map(|weight| weight > 0),
+                    arms_after.map(|weight| weight > 0),
+                    "arms changed at ({x}, {y})"
+                );
+                assert!(
+                    matches!(uniform_weight(after.symbol()), Some(2 | 3)),
+                    "light or mixed {:?} at ({x}, {y})",
+                    after.symbol()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn pane_heavy_borders_glyph_rule_renders_double_junctions_whole() {
+        for bits in 1..16u8 {
+            let line = line_cell_from_bits(bits);
+            let double = double_line_cell_symbol(line);
+            // Same arms as the light glyph, all double.
+            assert_eq!(
+                glyph_arms(double).map(|arms| arms.map(|weight| weight > 0)),
+                weighted_arms(line_cell_symbol(line)).map(|arms| arms.map(|weight| weight > 0)),
+                "bits={bits}"
+            );
+            assert_eq!(uniform_weight(double), Some(3));
+            // Heavy-only cells keep the light/heavy table: the heavy
+            // counterpart of the light glyph.
+            assert_eq!(
+                weighted_arms(weighted_line_cell_symbol(
+                    line,
+                    LineWeights::all(LineWeight::Heavy)
+                )),
+                weighted_arms(line_cell_symbol(line)).map(|arms| arms.map(|weight| weight * 2)),
+                "bits={bits}"
+            );
+            // Any single present double arm, mixed with heavy or light arms,
+            // draws the whole cell double.
+            for base in [LineWeight::Heavy, LineWeight::Light] {
+                for arm in 0..4 {
+                    let mut weights = LineWeights::all(base);
+                    let present = match arm {
+                        0 => {
+                            weights.up = LineWeight::Double;
+                            line.up
+                        }
+                        1 => {
+                            weights.down = LineWeight::Double;
+                            line.down
+                        }
+                        2 => {
+                            weights.left = LineWeight::Double;
+                            line.left
+                        }
+                        _ => {
+                            weights.right = LineWeight::Double;
+                            line.right
+                        }
+                    };
+                    let symbol = weighted_line_cell_symbol(line, weights);
+                    if present {
+                        assert_eq!(symbol, double, "bits={bits} {weights:?}");
+                    } else {
+                        // A double weight on an absent arm changes nothing.
+                        assert_eq!(
+                            symbol,
+                            weighted_line_cell_symbol(line, LineWeights::all(base)),
+                            "bits={bits} {weights:?}"
+                        );
+                    }
+                }
+            }
+        }
+        // Lone arms keep the full straight line.
+        assert_eq!(double_line_cell_symbol(line_cell_from_bits(8)), "║");
+        assert_eq!(double_line_cell_symbol(line_cell_from_bits(1)), "═");
+        // A focused frame corner meeting a heavy neighbor divider: `╦`, not `┳`.
+        let corner = LineCell {
+            up: false,
+            down: true,
+            left: true,
+            right: true,
+        };
+        assert_eq!(
+            weighted_line_cell_symbol(
+                corner,
+                LineWeights {
+                    down: LineWeight::Double,
+                    left: LineWeight::Double,
+                    ..LineWeights::all(LineWeight::Heavy)
+                }
+            ),
+            "╦"
+        );
+    }
+
+    #[test]
+    fn pane_heavy_borders_disabled_matches_a1_buffers() {
+        let (mut workspace, panes) = focus_weight_grid();
+        for focused in panes {
+            workspace.tabs[0].layout.focus_pane(focused);
+            for (gaps, outer) in [(false, true), (false, false), (true, true), (true, false)] {
+                for focus_weight in [false, true] {
+                    let area = Rect::new(0, 0, 12, 6);
+                    let mut app = focus_weight_app(PaneBordersConfig::Auto, gaps, outer);
+                    assert!(!app.pane_heavy_borders, "unset defaults to off");
+                    app.pane_focus_weight = focus_weight;
+                    let unset = render_layout_borders(&app, &workspace, area);
+                    let explicit =
+                        render_heavy_borders(&mut app, &workspace, area, false, focus_weight);
+                    assert_eq!(unset, explicit);
+                    assert!(cells_where(&unset, |s| glyph_arms(s)
+                        .is_some_and(|arms| arms.contains(&3)))
+                    .is_empty());
+                    if !focus_weight {
+                        assert!(cells_where(&unset, has_heavy_arm).is_empty());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pane_heavy_borders_make_every_pane_frame_heavy() {
+        let (mut workspace, [top_left, ..]) = focus_weight_grid();
+        workspace.tabs[0].layout.focus_pane(top_left);
+        let area = Rect::new(0, 0, 12, 6);
+        for (gaps, outer, expected) in [
+            (
+                false,
+                true,
+                [
+                    "┏━━━━━┳━━━━┓",
+                    "┃     ┃    ┃",
+                    "┃     ┃    ┃",
+                    "┣━━━━━╋━━━━┫",
+                    "┃     ┃    ┃",
+                    "┗━━━━━┻━━━━┛",
+                ],
+            ),
+            (
+                false,
+                false,
+                [
+                    "      ┃     ",
+                    "      ┃     ",
+                    "      ┃     ",
+                    "━━━━━━╋━━━━━",
+                    "      ┃     ",
+                    "      ┃     ",
+                ],
+            ),
+            (
+                true,
+                true,
+                [
+                    "┏━━━━┓┏━━━━┓",
+                    "┃    ┃┃    ┃",
+                    "┗━━━━┛┗━━━━┛",
+                    "┏━━━━┓┏━━━━┓",
+                    "┃    ┃┃    ┃",
+                    "┗━━━━┛┗━━━━┛",
+                ],
+            ),
+            (
+                true,
+                false,
+                [
+                    "     ┃┃     ",
+                    "     ┃┃     ",
+                    "━━━━━┛┗━━━━━",
+                    "━━━━━┓┏━━━━━",
+                    "     ┃┃     ",
+                    "     ┃┃     ",
+                ],
+            ),
+        ] {
+            let mut app = focus_weight_app(PaneBordersConfig::Auto, gaps, outer);
+            let plain = render_heavy_borders(&mut app, &workspace, area, false, false);
+            let heavy = render_heavy_borders(&mut app, &workspace, area, true, false);
+            assert_eq!(buffer_rows(&heavy), expected, "gaps={gaps} outer={outer}");
+            assert_family_only_changes(&plain, &heavy);
+            // With A1 off the accent color alone still marks focus.
+            assert!(!accented_line_cells(&app, &heavy).is_empty());
+            assert_eq!(
+                accented_line_cells(&app, &heavy),
+                accented_line_cells(&app, &plain)
+            );
+            assert!(cells_where(&heavy, |s| uniform_weight(s) == Some(3)).is_empty());
+        }
+    }
+
+    #[test]
+    fn pane_heavy_borders_with_focus_weight_draws_double_focus_frame() {
+        let (mut workspace, [top_left, _, _, bottom_right]) = focus_weight_grid();
+        let area = Rect::new(0, 0, 12, 6);
+        let mut app = focus_weight_app(PaneBordersConfig::Auto, false, true);
+        for (focused, expected) in [
+            (
+                top_left,
+                [
+                    "╔═════╦━━━━┓",
+                    "║     ║    ┃",
+                    "║     ║    ┃",
+                    "╠═════╬━━━━┫",
+                    "┃     ┃    ┃",
+                    "┗━━━━━┻━━━━┛",
+                ],
+            ),
+            // Moving focus moves the double frame; the old one returns to heavy.
+            (
+                bottom_right,
+                [
+                    "┏━━━━━┳━━━━┓",
+                    "┃     ┃    ┃",
+                    "┃     ┃    ┃",
+                    "┣━━━━━╬════╣",
+                    "┃     ║    ║",
+                    "┗━━━━━╩════╝",
+                ],
+            ),
+        ] {
+            workspace.tabs[0].layout.focus_pane(focused);
+            let plain = render_heavy_borders(&mut app, &workspace, area, false, false);
+            let a1_only = render_heavy_borders(&mut app, &workspace, area, false, true);
+            let heavy_only = render_heavy_borders(&mut app, &workspace, area, true, false);
+            let both = render_heavy_borders(&mut app, &workspace, area, true, true);
+            assert_eq!(buffer_rows(&both), expected);
+            assert_family_only_changes(&plain, &both);
+            assert_ne!(both, heavy_only, "A1 visibly differs under heavy borders");
+            // Double cells are exactly A1's heavy cells, which are the accented
+            // cells (styles are unchanged, so read them from the plain render).
+            let double = cells_where(&both, |s| uniform_weight(s) == Some(3));
+            assert!(!double.is_empty());
+            assert_eq!(double, cells_where(&a1_only, has_heavy_arm));
+            assert_eq!(double, accented_line_cells(&app, &plain));
+        }
+    }
+
+    #[test]
+    fn pane_heavy_borders_every_layout_keeps_arms_in_both_themes() {
+        let (mut workspace, panes) = focus_weight_grid();
+        for palette in [Palette::catppuccin(), Palette::catppuccin_latte()] {
+            for focused in panes {
+                workspace.tabs[0].layout.focus_pane(focused);
+                for (gaps, outer) in [(false, true), (false, false), (true, true), (true, false)] {
+                    for area in [
+                        Rect::new(0, 0, 3, 3),
+                        Rect::new(0, 0, 5, 3),
+                        Rect::new(0, 0, 12, 6),
+                        Rect::new(0, 0, 40, 12),
+                    ] {
+                        let mut app = focus_weight_app(PaneBordersConfig::Auto, gaps, outer);
+                        app.palette = palette.clone();
+                        let plain = render_heavy_borders(&mut app, &workspace, area, false, false);
+                        let a1_only = render_heavy_borders(&mut app, &workspace, area, false, true);
+                        for focus_weight in [false, true] {
+                            let on = render_heavy_borders(
+                                &mut app,
+                                &workspace,
+                                area,
+                                true,
+                                focus_weight,
+                            );
+                            assert_family_only_changes(&plain, &on);
+                            let double = cells_where(&on, |s| uniform_weight(s) == Some(3));
+                            if focus_weight {
+                                assert_eq!(
+                                    double,
+                                    cells_where(&a1_only, has_heavy_arm),
+                                    "gaps={gaps} outer={outer} area={area:?}"
+                                );
+                            } else {
+                                assert!(double.is_empty());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pane_heavy_borders_lone_and_narrow_panes() {
+        let lone = Workspace::test_new("test");
+        let area = Rect::new(0, 0, 6, 3);
+        let mut app = focus_weight_app(PaneBordersConfig::Always, false, true);
+        let plain = render_heavy_borders(&mut app, &lone, area, false, false);
+        let heavy = render_heavy_borders(&mut app, &lone, area, true, false);
+        let both = render_heavy_borders(&mut app, &lone, area, true, true);
+        assert_eq!(buffer_rows(&heavy), vec!["┏━━━━┓", "┃    ┃", "┗━━━━┛"]);
+        assert_eq!(buffer_rows(&both), vec!["╔════╗", "║    ║", "╚════╝"]);
+        assert_family_only_changes(&plain, &heavy);
+        assert_family_only_changes(&plain, &both);
+
+        // `auto` leaves a lone pane unframed either way.
+        let mut app = focus_weight_app(PaneBordersConfig::Auto, false, true);
+        let plain = render_heavy_borders(&mut app, &lone, area, false, false);
+        let both = render_heavy_borders(&mut app, &lone, area, true, true);
+        assert_eq!(plain, both);
+    }
+
+    #[test]
+    fn pane_heavy_borders_keep_focused_title_text_and_bold() {
+        let mut workspace = Workspace::test_new("test");
+        let left = workspace.tabs[0].root_pane;
+        workspace.test_split(ratatui::layout::Direction::Horizontal);
+        workspace.tabs[0].layout.focus_pane(left);
+        let mut app = focus_weight_app(PaneBordersConfig::Auto, false, true);
+        let terminal_id = workspace.tabs[0].panes[&left].attached_terminal_id.clone();
+        let mut terminal_state = TerminalState::new(terminal_id.clone(), "/tmp".into());
+        terminal_state.set_manual_label("api".into());
+        app.terminals.insert(terminal_id, terminal_state);
+        let area = Rect::new(0, 0, 20, 4);
+
+        let plain = render_heavy_borders(&mut app, &workspace, area, false, false);
+        let heavy = render_heavy_borders(&mut app, &workspace, area, true, false);
+        let both = render_heavy_borders(&mut app, &workspace, area, true, true);
+        assert_eq!(
+            buffer_rows(&heavy),
+            vec![
+                "┏ api ━━━━┳━━━━━━━━┓",
+                "┃         ┃        ┃",
+                "┃         ┃        ┃",
+                "┗━━━━━━━━━┻━━━━━━━━┛",
+            ]
+        );
+        assert_eq!(
+            buffer_rows(&both),
+            vec![
+                "╔ api ════╦━━━━━━━━┓",
+                "║         ║        ┃",
+                "║         ║        ┃",
+                "╚═════════╩━━━━━━━━┛",
+            ]
+        );
+        for buffer in [&heavy, &both] {
+            assert_family_only_changes(&plain, buffer);
+            let title = &buffer[(2, 0)];
+            assert_eq!(title.symbol(), "a");
+            assert_eq!(title.style().fg, Some(app.palette.accent));
+            assert!(title.style().add_modifier.contains(Modifier::BOLD));
+        }
     }
 }
