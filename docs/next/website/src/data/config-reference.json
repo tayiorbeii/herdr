@@ -988,6 +988,18 @@
           "description": "Keep split panes visually separated instead of sharing divider borders."
         },
         {
+          "key": "ui.inactive_pane_dim_percent",
+          "type": "integer",
+          "default": "0",
+          "description": "Fade the text of unfocused panes in terminal mode by blending text colors toward the terminal default background by this percent (0-100, 0 = off). Display only: backgrounds, borders, faint text, selections, text on its own background color (including reverse video) and pane contents are unchanged. Needs the terminal to report its default colors and palette; unreported colors stay as they are. Malformed values are reported and ignored."
+        },
+        {
+          "key": "ui.inactive_pane_dim_exclude_processes",
+          "type": "list of strings",
+          "default": "[]",
+          "description": "Exact foreground-process basenames whose panes should not be faded. Accepted but not applied yet: Herdr cannot see pane foreground processes when it draws. Malformed values are reported and ignored."
+        },
+        {
           "key": "ui.show_agent_labels_on_pane_borders",
           "type": "boolean",
           "default": "false",

@@ -313,6 +313,8 @@ The sidebar is the main Herdr dashboard. Search `ui.` in the [Config reference](
 
 `ui.pane_borders` accepts `"auto"` (the default, borders only for split panes), `"always"` (also frame a single pane), or `"off"`. A single-pane frame requires `ui.pane_outer_borders = true`, because all its edges are outer edges. Existing boolean values remain valid: `true` means `"auto"` and `false` means `"off"`.
 
+Set `inactive_pane_dim_percent = N` under `[ui]` (0 to 100, default `0` = off) to fade the text of unfocused panes while you type in the focused one. Herdr blends each text color toward the terminal's default background by N percent, only on screen: pane contents, copied text and the programs inside are unchanged. It applies only in normal terminal mode (prefix, copy, navigate and resize modes show panes unchanged) and never changes backgrounds, borders, the focus accent, faint text, selections, or text drawn on its own background color (including reverse video). It needs your terminal to answer color queries for its default colors and palette; colors it does not report are left as they are. `100` makes the text match the background. `inactive_pane_dim_exclude_processes = ["name", ...]` is accepted for listing foreground programs to leave undimmed, but it has no effect yet because Herdr cannot see pane foreground processes when it draws. A malformed value for either key is reported and ignored.
+
 Set `tab_bar_position = "bottom"` under `[ui]` to place the desktop tab row below the terminal panes. Prefix, Navigate, Copy, and Resize mode bars temporarily replace the bottom tab row while active. The default is `"top"`.
 
 Configure an ordered tmux-style status area at the right edge of the tab row:

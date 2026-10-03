@@ -303,6 +303,14 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Keep split panes visually separated instead of sharing divider borders.
 # pane_gaps = true
 
+# Fade the text of unfocused panes in terminal mode: blend text colors toward the
+# terminal default background by this percent (0-100, 0 = off). Display only; backgrounds,
+# borders, faint text, selections and pane contents are unchanged.
+# inactive_pane_dim_percent = 30
+# Foreground programs to leave undimmed. Accepted but not applied yet: herdr cannot see
+# pane foreground processes when it draws.
+# inactive_pane_dim_exclude_processes = []
+
 # Show detected/reported agent labels in split pane borders when no manual pane name is set.
 # show_agent_labels_on_pane_borders = false
 

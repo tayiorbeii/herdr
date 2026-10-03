@@ -121,6 +121,7 @@ impl ClientShellConfig {
             mobile_width_threshold: config.ui.mobile_width_threshold,
             tab_bar_position: config.ui.tab_bar_position,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
+            inactive_pane_dim_percent: config.ui.inactive_pane_dim_percent(),
             spaces: config.ui.sidebar.spaces.clone(),
             agents: config.ui.sidebar.agents.clone(),
             agent_panel_sort: config.ui.agent_panel_sort,
@@ -316,6 +317,7 @@ impl ClientShellConfig {
             } else {
                 let ui = &config.ui;
                 diagnostics.extend(ui.sound.diagnostics());
+                diagnostics.extend(ui.inactive_pane_dim_diagnostics());
                 self.sidebar_width = ui.sidebar_width;
                 self.sidebar_min_width = ui.sidebar_min_width;
                 self.sidebar_max_width = ui.sidebar_max_width;
@@ -323,6 +325,7 @@ impl ClientShellConfig {
                 self.mobile_width_threshold = ui.mobile_width_threshold;
                 self.tab_bar_position = ui.tab_bar_position;
                 self.hide_tab_bar_when_single_tab = ui.hide_tab_bar_when_single_tab;
+                self.inactive_pane_dim_percent = ui.inactive_pane_dim_percent();
                 self.spaces = ui.sidebar.spaces.clone();
                 self.agents = ui.sidebar.agents.clone();
                 self.agent_panel_sort = ui.agent_panel_sort;
@@ -449,6 +452,45 @@ mod tests {
     use crossterm::event::{KeyCode, KeyModifiers};
 
     use super::*;
+
+    #[test]
+    fn inactive_pane_dim_loads_reloads_and_removes() {
+        let default = Config::default();
+        let mut shell = ClientShellConfig::from_config(&default);
+        assert_eq!(shell.inactive_pane_dim_percent, 0);
+        let enabled: Config = toml::from_str("[ui]\ninactive_pane_dim_percent = 35\n").unwrap();
+        assert_eq!(
+            ClientShellConfig::from_config(&enabled).inactive_pane_dim_percent,
+            35
+        );
+        assert!(shell.apply_live_config(&enabled, &[], &[]).is_empty());
+        assert_eq!(shell.inactive_pane_dim_percent, 35);
+
+        let malformed: Config =
+            toml::from_str("[ui]\ninactive_pane_dim_percent = \"35\"\n").unwrap();
+        assert_eq!(
+            shell.apply_live_config(&malformed, &[], &[]),
+            vec![
+                "ui.inactive_pane_dim_percent = \"35\" is not a whole percent from 0 to 100; disabling inactive pane dimming"
+                    .to_string()
+            ]
+        );
+        assert_eq!(shell.inactive_pane_dim_percent, 0);
+
+        assert!(shell.apply_live_config(&enabled, &[], &[]).is_empty());
+        assert!(shell.apply_live_config(&default, &[], &[]).is_empty());
+        assert_eq!(
+            shell.inactive_pane_dim_percent, 0,
+            "removal restores baseline"
+        );
+
+        shell.apply_live_config(&enabled, &[], &[]);
+        shell.apply_live_config(&default, &[], &["ui".into()]);
+        assert_eq!(
+            shell.inactive_pane_dim_percent, 35,
+            "an invalid [ui] section keeps the current preference"
+        );
+    }
 
     #[test]
     fn live_reload_applies_client_owned_sections() {
