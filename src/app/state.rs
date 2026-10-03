@@ -834,6 +834,8 @@ pub struct AppState {
     pub pane_outer_borders: bool,
     pub pane_scrollbars: bool,
     pub pane_gaps: bool,
+    /// Valid `ui.pane_gap_cells` override; `None` keeps the legacy `pane_gaps` path.
+    pub pane_gap_cells: Option<u16>,
     pub show_agent_labels_on_pane_borders: bool,
     pub tab_bar_right: Vec<TabBarStatusSegment>,
     pub tab_bar_right_separator: String,
@@ -893,6 +895,14 @@ pub struct AppState {
 impl AppState {
     pub(crate) fn mark_session_dirty(&mut self) {
         self.session_dirty = true;
+    }
+
+    /// Inter-pane spacing: the `pane_gap_cells` override when set, else legacy `pane_gaps`.
+    pub(crate) fn pane_spacing(&self) -> crate::ui::PaneSpacing {
+        match self.pane_gap_cells {
+            Some(cells) => crate::ui::PaneSpacing::Cells(cells),
+            None => crate::ui::PaneSpacing::Legacy(self.pane_gaps),
+        }
     }
 
     pub(crate) fn remove_alias_shadowed_by_new_pane(&mut self, pane_id: PaneId) {
@@ -1060,6 +1070,7 @@ impl AppState {
             pane_outer_borders: true,
             pane_scrollbars: true,
             pane_gaps: false,
+            pane_gap_cells: None,
             show_agent_labels_on_pane_borders: false,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: " ".into(),

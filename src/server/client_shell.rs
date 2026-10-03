@@ -416,7 +416,7 @@ pub(super) fn render_pane_surface(
             let hit_rect = split_hit_rect(
                 split,
                 app.state.pane_borders.draws_borders(),
-                app.state.pane_gaps,
+                layout.pane_gaps,
                 &pane_frames,
             )?;
             let direction = match split.direction {
@@ -573,15 +573,17 @@ fn client_popup_size(size: crate::popup_size::PopupSize) -> protocol::ClientShel
 fn split_hit_rect(
     split: &crate::layout::SplitBorder,
     pane_borders: bool,
-    pane_gaps: bool,
+    pane_gaps: crate::ui::PaneGaps,
     pane_frames: &[Rect],
 ) -> Option<Rect> {
-    let hit = match (split.direction, pane_borders, pane_gaps) {
+    // Separated frames: both frame edges plus the blank cells taken from the leading pane.
+    let leading = 1u16.saturating_add(pane_gaps.blank);
+    let hit = match (split.direction, pane_borders, pane_gaps.separate) {
         (ratatui::layout::Direction::Horizontal, true, false) => {
             Rect::new(split.pos, split.area.y, 1, split.area.height)
         }
         (ratatui::layout::Direction::Horizontal, true, true) => {
-            let start = split.pos.saturating_sub(1);
+            let start = split.pos.saturating_sub(leading);
             Rect::new(
                 start,
                 split.area.y,
@@ -590,16 +592,16 @@ fn split_hit_rect(
             )
         }
         (ratatui::layout::Direction::Horizontal, false, true) => Rect::new(
-            split.pos.checked_sub(1)?,
+            split.pos.checked_sub(pane_gaps.blank)?,
             split.area.y,
-            1,
+            pane_gaps.blank,
             split.area.height,
         ),
         (ratatui::layout::Direction::Vertical, true, false) => {
             Rect::new(split.area.x, split.pos, split.area.width, 1)
         }
         (ratatui::layout::Direction::Vertical, true, true) => {
-            let start = split.pos.saturating_sub(1);
+            let start = split.pos.saturating_sub(leading);
             Rect::new(
                 split.area.x,
                 start,
@@ -607,9 +609,12 @@ fn split_hit_rect(
                 split.pos.saturating_sub(start).saturating_add(1),
             )
         }
-        (ratatui::layout::Direction::Vertical, false, true) => {
-            Rect::new(split.area.x, split.pos.checked_sub(1)?, split.area.width, 1)
-        }
+        (ratatui::layout::Direction::Vertical, false, true) => Rect::new(
+            split.area.x,
+            split.pos.checked_sub(pane_gaps.blank)?,
+            split.area.width,
+            pane_gaps.blank,
+        ),
         (_, false, false) => return None,
     };
     if !pane_borders
@@ -702,18 +707,41 @@ mod tests {
             path: vec![false],
         };
         assert_eq!(
-            split_hit_rect(&horizontal, true, false, &[]),
+            split_hit_rect(
+                &horizontal,
+                true,
+                crate::ui::PaneGaps::legacy(false, true),
+                &[]
+            ),
             Some(Rect::new(20, 3, 1, 12))
         );
         assert_eq!(
-            split_hit_rect(&horizontal, true, true, &[]),
+            split_hit_rect(
+                &horizontal,
+                true,
+                crate::ui::PaneGaps::legacy(true, true),
+                &[]
+            ),
             Some(Rect::new(19, 3, 2, 12))
         );
         assert_eq!(
-            split_hit_rect(&horizontal, false, true, &[]),
+            split_hit_rect(
+                &horizontal,
+                false,
+                crate::ui::PaneGaps::legacy(true, false),
+                &[]
+            ),
             Some(Rect::new(19, 3, 1, 12))
         );
-        assert_eq!(split_hit_rect(&horizontal, false, false, &[]), None);
+        assert_eq!(
+            split_hit_rect(
+                &horizontal,
+                false,
+                crate::ui::PaneGaps::legacy(false, false),
+                &[]
+            ),
+            None
+        );
 
         let vertical = crate::layout::SplitBorder {
             pos: 9,
@@ -723,7 +751,12 @@ mod tests {
             path: vec![true],
         };
         assert_eq!(
-            split_hit_rect(&vertical, true, true, &[]),
+            split_hit_rect(
+                &vertical,
+                true,
+                crate::ui::PaneGaps::legacy(true, true),
+                &[]
+            ),
             Some(Rect::new(2, 8, 40, 2))
         );
 
@@ -735,13 +768,290 @@ mod tests {
             path: Vec::new(),
         };
         assert_eq!(
-            split_hit_rect(&edge, true, true, &[]),
+            split_hit_rect(&edge, true, crate::ui::PaneGaps::legacy(true, true), &[]),
             Some(Rect::new(0, 0, 1, 4))
         );
-        assert_eq!(split_hit_rect(&edge, false, true, &[]), None);
         assert_eq!(
-            split_hit_rect(&horizontal, false, true, &[Rect::new(19, 3, 1, 12)]),
+            split_hit_rect(&edge, false, crate::ui::PaneGaps::legacy(true, false), &[]),
             None
         );
+        assert_eq!(
+            split_hit_rect(
+                &horizontal,
+                false,
+                crate::ui::PaneGaps::legacy(true, false),
+                &[Rect::new(19, 3, 1, 12)]
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn split_hits_follow_configured_pane_gap_cells() {
+        let gaps = crate::ui::PaneGaps {
+            separate: true,
+            blank: 3,
+        };
+        let horizontal = crate::layout::SplitBorder {
+            pos: 20,
+            direction: ratatui::layout::Direction::Horizontal,
+            ratio: 0.5,
+            area: Rect::new(2, 3, 40, 12),
+            path: vec![false],
+        };
+        // Both frame edges plus the three blank cells taken from the leading pane.
+        assert_eq!(
+            split_hit_rect(&horizontal, true, gaps, &[]),
+            Some(Rect::new(16, 3, 5, 12))
+        );
+        // Frames off: only the blank cells.
+        assert_eq!(
+            split_hit_rect(&horizontal, false, gaps, &[]),
+            Some(Rect::new(17, 3, 3, 12))
+        );
+        let vertical = crate::layout::SplitBorder {
+            pos: 9,
+            direction: ratatui::layout::Direction::Vertical,
+            ratio: 0.5,
+            area: Rect::new(2, 3, 40, 12),
+            path: vec![true],
+        };
+        assert_eq!(
+            split_hit_rect(&vertical, true, gaps, &[]),
+            Some(Rect::new(2, 5, 40, 5))
+        );
+        assert_eq!(
+            split_hit_rect(&vertical, false, gaps, &[]),
+            Some(Rect::new(2, 6, 40, 3))
+        );
+        // A pane that could not give up its cells keeps the hit off its content.
+        assert_eq!(
+            split_hit_rect(&horizontal, false, gaps, &[Rect::new(2, 3, 18, 12)]),
+            None
+        );
+        // An effective gap of zero is the shared divider.
+        let shared = crate::ui::PaneGaps::default();
+        assert_eq!(
+            split_hit_rect(&horizontal, true, shared, &[]),
+            Some(Rect::new(20, 3, 1, 12))
+        );
+        assert_eq!(split_hit_rect(&horizontal, false, shared, &[]), None);
+    }
+
+    fn gap_test_runtime(label: &[u8]) -> crate::terminal::TerminalRuntime {
+        let mut bytes = Vec::new();
+        for line in 0..120 {
+            bytes.extend_from_slice(format!("line {line}\r\n").as_bytes());
+        }
+        bytes.extend_from_slice(label);
+        crate::terminal::TerminalRuntime::test_with_scrollback_bytes(80, 23, 1 << 20, &bytes)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn pane_gap_cells_follow_real_pane_geometry_through_the_client() {
+        const COLS: u16 = 100;
+        const ROWS: u16 = 30;
+        let mut config = crate::config::Config::default();
+        config.ui.pane_gap_cells = Some(toml::Value::Integer(3));
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::new(
+            &config,
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let mut workspace = crate::workspace::Workspace::test_new("gaps");
+        let left = workspace.tabs[0].root_pane;
+        workspace.insert_test_runtime(left, gap_test_runtime(b"LEFT"));
+        let right = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        workspace.insert_test_runtime(right, gap_test_runtime(b"RIGHT"));
+        let hidden = workspace.test_add_tab(None);
+        workspace.switch_tab(hidden);
+        let top = workspace.tabs[hidden].root_pane;
+        workspace.insert_test_runtime(top, gap_test_runtime(b"TOP"));
+        let bottom = workspace.test_split(ratatui::layout::Direction::Vertical);
+        workspace.insert_test_runtime(bottom, gap_test_runtime(b"BOTTOM"));
+        workspace.switch_tab(0);
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        assert_eq!(app.state.pane_gap_cells, Some(3));
+
+        let mut client = crate::client::ClientShellState::new(
+            crate::client::ClientShellConfig::from_config(&config),
+        );
+        client.set_snapshot(Box::new(snapshot(&app, "boot", 1, None, None)));
+        let size = client.surface_size(COLS, ROWS);
+        let area = Rect::new(0, 0, size.cols, size.rows);
+        let target = |tab_index| {
+            Some(crate::ui::TabSurfaceTarget {
+                workspace_index: 0,
+                tab_index,
+            })
+        };
+        let cell_size = crate::kitty_graphics::HostCellSize {
+            width_px: 1,
+            height_px: 1,
+        };
+        let render = |app: &mut crate::app::App, area: Rect| {
+            render_pane_surface(
+                app,
+                target(0),
+                area,
+                true,
+                true,
+                cell_size,
+                &crate::kitty_graphics::surface::DeliveryCache::default(),
+                1,
+            )
+            .expect("pane surface")
+        };
+        let surface_rect =
+            |rect: protocol::SurfaceRect| Rect::new(rect.x, rect.y, rect.width, rect.height);
+        let dimensions = |app: &crate::app::App, pane| {
+            app.state.workspaces[0].test_runtimes[&pane]
+                .terminal_dimensions()
+                .expect("terminal dimensions")
+        };
+        // Every wire pane's PTY matches its content rect, so pointer origins line up.
+        // (The runtime floors PTYs at 4x2 cells, as at baseline.)
+        let assert_pty_matches_wire =
+            |app: &crate::app::App, panes: &[protocol::PaneSurfacePane]| {
+                for pane in panes {
+                    let (_, id) = app.parse_pane_id(&pane.pane_id).expect("pane id");
+                    let inner = surface_rect(pane.inner_rect);
+                    assert_eq!(
+                        dimensions(app, id),
+                        (inner.width.max(4), inner.height.max(2))
+                    );
+                    assert!(
+                        inner.x >= pane.rect.x && inner.right() <= pane.rect.x + pane.rect.width
+                    );
+                }
+            };
+
+        let rendered = render(&mut app, area);
+        assert_pty_matches_wire(&app, &rendered.panes);
+        let first_width = (f32::from(area.width) * 0.5).round() as u16;
+        let pane_rect = |rendered: &RenderedPaneSurface, id| {
+            let pane = rendered
+                .panes
+                .iter()
+                .find(|pane| app.parse_pane_id(&pane.pane_id).map(|(_, pane)| pane) == Some(id))
+                .expect("pane");
+            (
+                surface_rect(pane.rect),
+                surface_rect(pane.inner_rect),
+                pane.scrollbar_rect.map(surface_rect),
+            )
+        };
+        let (left_rect, left_inner, left_scrollbar) = pane_rect(&rendered, left);
+        let (right_rect, ..) = pane_rect(&rendered, right);
+        assert_eq!(left_rect, Rect::new(0, 0, first_width - 3, area.height));
+        assert_eq!(
+            right_rect,
+            Rect::new(first_width, 0, area.width - first_width, area.height)
+        );
+        // The scrollbar lane stays inside the pane frame, right of the PTY.
+        let scrollbar = left_scrollbar.expect("scrollback shows the scrollbar");
+        assert_eq!(scrollbar.x, left_inner.right());
+        assert_eq!(scrollbar.x, left_rect.right() - 2);
+        assert_eq!(left_inner.width, left_rect.width - 3);
+
+        // Split handle: both frame edges and the three blank cells.
+        assert_eq!(rendered.splits.len(), 1);
+        assert_eq!(rendered.splits[0].pos, first_width);
+        assert_eq!(
+            surface_rect(rendered.splits[0].hit_rect),
+            Rect::new(first_width - 4, 0, 5, area.height)
+        );
+        let row = |frame: &protocol::FrameData, y: u16, xs: std::ops::Range<u16>| {
+            xs.map(|x| {
+                frame.cells[usize::from(y * frame.width + x)]
+                    .symbol
+                    .as_str()
+            })
+            .collect::<String>()
+        };
+        assert_eq!(
+            row(&rendered.frame, 5, first_width - 4..first_width + 1),
+            "│   │"
+        );
+
+        let wire_panes = rendered.panes.clone();
+        client.set_pane_surface(protocol::PaneSurfaceFrame {
+            boot_id: "boot".into(),
+            projection_revision: 1,
+            surface_revision: 0,
+            frame: rendered.frame,
+            panes: rendered.panes,
+            splits: rendered.splits,
+            popup: rendered.popup,
+            graphics: rendered.graphics,
+        });
+        let composed = client.compose(COLS, ROWS).expect("composed frame").frame;
+        let symbols: Vec<&str> = composed
+            .cells
+            .iter()
+            .map(|cell| cell.symbol.as_str())
+            .collect();
+        assert!(symbols.windows(5).any(|w| w == ["│", " ", " ", " ", "│"]));
+
+        // Hidden tab PTYs get the same spaced geometry the tab will show.
+        crate::ui::resize_tab_surface(
+            &app.state,
+            &app.terminal_runtimes,
+            0,
+            hidden,
+            area,
+            cell_size,
+        );
+        let hidden_layout = crate::ui::compute_tab_surface_for(
+            &app.state,
+            &app.terminal_runtimes,
+            target(hidden),
+            area,
+            false,
+            cell_size,
+        );
+        assert_eq!(hidden_layout.pane_gaps.blank, 3);
+        let first_height = (f32::from(area.height) * 0.5).round() as u16;
+        for info in &hidden_layout.pane_infos {
+            assert_eq!(
+                dimensions(&app, info.id),
+                (info.inner_rect.width, info.inner_rect.height)
+            );
+        }
+        let top_info = hidden_layout
+            .pane_infos
+            .iter()
+            .find(|info| info.id == top)
+            .expect("top pane");
+        assert_eq!(top_info.rect.height, first_height - 3);
+
+        // Zoom shows one framed pane without spacing.
+        app.state.workspaces[0].tabs[0].zoomed = true;
+        let zoomed = render(&mut app, area);
+        assert_eq!(zoomed.panes.len(), 1);
+        assert!(zoomed.splits.is_empty());
+        assert_eq!(surface_rect(zoomed.panes[0].rect), area);
+        assert_pty_matches_wire(&app, &zoomed.panes);
+        app.state.workspaces[0].tabs[0].zoomed = false;
+
+        // Shrinking reduces the effective gap; re-expanding restores every PTY size.
+        let small = render(&mut app, Rect::new(0, 0, 12, 8));
+        assert_pty_matches_wire(&app, &small.panes);
+        for pane in &small.panes {
+            assert!(pane.inner_rect.width >= 1 && pane.inner_rect.height >= 1);
+        }
+        let restored = render(&mut app, area);
+        assert_pty_matches_wire(&app, &restored.panes);
+        assert_eq!(restored.panes.len(), wire_panes.len());
+        for (after, before) in restored.panes.iter().zip(&wire_panes) {
+            assert_eq!(after.rect, before.rect);
+            assert_eq!(after.inner_rect, before.inner_rect);
+            assert_eq!(after.scrollbar_rect, before.scrollbar_rect);
+        }
     }
 }

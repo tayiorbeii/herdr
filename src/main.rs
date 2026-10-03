@@ -303,6 +303,11 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Keep split panes visually separated instead of sharing divider borders.
 # pane_gaps = true
 
+# Blank cells between neighbouring split panes (0-65535); overrides pane_gaps when set.
+# 0 shares dividers; N leaves N empty cells between pane frames (frame lines are extra).
+# Small windows shrink the gap only as needed to keep every pane usable.
+# pane_gap_cells = 1
+
 # Show detected/reported agent labels in split pane borders when no manual pane name is set.
 # show_agent_labels_on_pane_borders = false
 
