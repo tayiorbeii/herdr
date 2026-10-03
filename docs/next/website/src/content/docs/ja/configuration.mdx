@@ -271,6 +271,8 @@ dark_name = "catppuccin"
 
 ```toml
 [theme.custom]
+pane_border_active = "#89b4fa"
+pane_border_inactive = "#6c7086"
 sidebar_bg = "#181825"
 active_row_bg = "#1e1e2e"
 selection_bg = "#313244"
@@ -284,6 +286,8 @@ yellow = "#f9e2af"
 
 `sidebar_bg` を使うと、デスクトップのサイドバーだけに背景色を設定できます。省略した場合、サイドバーはホストターミナルの背景を使います。`active_row_bg` は、区切り線やスクロールバートラックに影響を与えず、アクティブな Space とフォーカス中の Agent 行の背景色を変更します。`selection_bg` は、サイドバーの Navigate モードのカーソル行の背景色を変更します。
 
+`pane_border_active` と `pane_border_inactive` は、フォーカス中と非フォーカスのペインの枠線とペイン境界タイトルの色だけを変更します。タブ、ポップアップ、オーバーレイ、サイドバー、その他の `accent` の用途には影響しません。省略時は、フォーカス中のペインは解決済みの `accent`、非フォーカスのペインは解決済みの `overlay0` に従うため、既存の `accent` と `overlay0` の上書きはそのまま反映されます。リセットエイリアスは継承ではなく、ターミナルのデフォルト前景色を明示的に使います。両方を同じ値にすると、フォーカス中と非フォーカスのペインの色の違いは意図的になくなります。フォーカス中のペインタイトルは太字のままです。モード別のサブテーブルで省略した項目は `[theme.custom]` を継承し、`auto_switch` が有効な場合にのみ適用されます。設定のライブ再読み込みで反映され、上書きを削除すると既定色に戻ります。
+
 色の値には、hex、名前付きの色、`rgb(r,g,b)`、または `reset`、`default`、`none`、`transparent` のようなリセットエイリアスが使えます。
 
 `auto_switch` が有効な場合は、ライト/ダーク別のサブテーブルを共有カスタム色の上に重ねられます:
@@ -293,10 +297,12 @@ yellow = "#f9e2af"
 accent = "#89b4fa"
 
 [theme.custom.light]
+pane_border_active = "#1e66f5"
 panel_bg = "#eff1f5"
 text = "#4c4f69"
 
 [theme.custom.dark]
+pane_border_active = "#89b4fa"
 panel_bg = "#1e1e2e"
 text = "#cdd6f4"
 ```

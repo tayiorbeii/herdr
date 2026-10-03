@@ -84,6 +84,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Override individual color tokens on top of the base theme.
 # Accepts: hex (#rrggbb), named colors, rgb(r,g,b), or panel_bg = "reset"
 # [theme.custom]
+# Pane frame and title only; omitted active follows accent, omitted inactive follows
+# overlay0. Equal values remove the color-only focus cue (the focused title stays bold).
+# pane_border_active = "#89b4fa"
+# pane_border_inactive = "#6c7086"
 # sidebar_bg = "#181825"
 # active_row_bg = "#1e1e2e"
 # selection_bg = "#313244"
@@ -94,10 +98,12 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 
 # Layer appearance-specific overrides on top when auto_switch is enabled.
 # [theme.custom.light]
+# pane_border_active = "#1e66f5"
 # panel_bg = "#eff1f5"
 # text = "#4c4f69"
 #
 # [theme.custom.dark]
+# pane_border_active = "#89b4fa"
 # panel_bg = "#1e1e2e"
 # text = "#cdd6f4"
 

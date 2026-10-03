@@ -271,6 +271,8 @@ dark_name = "catppuccin"
 
 ```toml
 [theme.custom]
+pane_border_active = "#89b4fa"
+pane_border_inactive = "#6c7086"
 sidebar_bg = "#181825"
 active_row_bg = "#1e1e2e"
 selection_bg = "#313244"
@@ -284,6 +286,8 @@ yellow = "#f9e2af"
 
 `sidebar_bg` 可单独设置桌面侧边栏的背景色。省略时，侧边栏继续使用宿主终端背景。`active_row_bg` 可更改当前 Space 和已聚焦 Agent 行的背景色，而不会影响分隔线或滚动条轨道。`selection_bg` 可更改侧边栏中 Navigate 模式光标行的背景色。
 
+`pane_border_active` 和 `pane_border_inactive` 仅更改已聚焦和未聚焦窗格的边框及窗格边框标题颜色，不影响标签页、弹出窗口、浮层、侧边栏或其他使用 `accent` 的位置。省略时，已聚焦窗格跟随解析后的 `accent`，未聚焦窗格跟随解析后的 `overlay0`，因此现有的 `accent` 和 `overlay0` 覆盖仍然生效。重置别名明确使用终端默认前景色，而不是继承。将两者设为相同值会有意消除已聚焦与未聚焦窗格之间的颜色差异；已聚焦窗格的标题仍保持粗体。模式子表中省略的字段继承 `[theme.custom]`，且仅在启用 `auto_switch` 时生效。实时重载配置即可应用更改，移除覆盖会恢复默认色。
+
 颜色值支持十六进制、命名颜色、`rgb(r,g,b)`，以及 `reset`、`default`、`none`、`transparent` 等重置别名。
 
 启用 `auto_switch` 后，可以通过明暗模式子表在共享自定义颜色之上应用不同的覆盖值：
@@ -293,10 +297,12 @@ yellow = "#f9e2af"
 accent = "#89b4fa"
 
 [theme.custom.light]
+pane_border_active = "#1e66f5"
 panel_bg = "#eff1f5"
 text = "#4c4f69"
 
 [theme.custom.dark]
+pane_border_active = "#89b4fa"
 panel_bg = "#1e1e2e"
 text = "#cdd6f4"
 ```
