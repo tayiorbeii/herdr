@@ -271,6 +271,8 @@ dark_name = "catppuccin"
 
 ```toml
 [theme.custom]
+active_tab_fg = "#181825"
+active_tab_bg = "#89b4fa"
 sidebar_bg = "#181825"
 active_row_bg = "#1e1e2e"
 selection_bg = "#313244"
@@ -284,7 +286,9 @@ yellow = "#f9e2af"
 
 `sidebar_bg` を使うと、デスクトップのサイドバーだけに背景色を設定できます。省略した場合、サイドバーはホストターミナルの背景を使います。`active_row_bg` は、区切り線やスクロールバートラックに影響を与えず、アクティブな Space とフォーカス中の Agent 行の背景色を変更します。`selection_bg` は、サイドバーの Navigate モードのカーソル行の背景色を変更します。
 
-色の値には、hex、名前付きの色、`rgb(r,g,b)`、または `reset`、`default`、`none`、`transparent` のようなリセットエイリアスが使えます。
+`active_tab_fg` と `active_tab_bg` は、フォーカス中のタブラベルの前景色と背景色だけを個別に変更します。非アクティブなタブやステータス表示には影響しません。省略時の前景色は解決済みの `panel_bg`（`panel_bg` がリセットの場合は `surface_dim`）、背景色は解決済みの `accent` に従います。リセットエイリアスは継承ではなく、ターミナルのデフォルト色を明示的に使います。カスタムラベルの太字とタブバーの表示条件は変わりません。
+
+色の値には、hex（`#rgb` または `#rrggbb`）、名前付きの色、`rgb(r,g,b)`、または `reset`、`default`、`none`、`transparent` のようなリセットエイリアスが使えます。
 
 `auto_switch` が有効な場合は、ライト/ダーク別のサブテーブルを共有カスタム色の上に重ねられます:
 
@@ -293,15 +297,19 @@ yellow = "#f9e2af"
 accent = "#89b4fa"
 
 [theme.custom.light]
+active_tab_fg = "#eff1f5"
+active_tab_bg = "#1e66f5"
 panel_bg = "#eff1f5"
 text = "#4c4f69"
 
 [theme.custom.dark]
+active_tab_fg = "#181825"
+active_tab_bg = "#89b4fa"
 panel_bg = "#1e1e2e"
 text = "#cdd6f4"
 ```
 
-有効なパレットには、組み込みテーマ、`[theme.custom]`、`[theme.custom.light]` または `[theme.custom.dark]` の順で適用されます。モード別のサブテーブルを省略すると、既存の共有上書きの挙動が維持されます。
+有効なパレットには、組み込みテーマ、`[theme.custom]`、`[theme.custom.light]` または `[theme.custom.dark]` の順で適用されます。モード別の項目を省略すると共通値を継承し、アクティブタブの共通値も省略すると上記の動的な既定色を使います。`auto_switch` が無効の場合、モード別の上書きは無視されます。初回読み込み、設定のライブ再読み込み、ホストの外観変更は同じ解決処理を使います。再読み込み時に上書きを削除すると、継承または既定色に戻ります。
 
 ## UI とサイドバー
 
