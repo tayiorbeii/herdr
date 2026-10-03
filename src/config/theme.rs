@@ -103,6 +103,7 @@ pub struct CustomThemeColors {
     pub accent: Option<String>,
     pub panel_bg: Option<String>,
     pub sidebar_bg: Option<String>,
+    pub pane_inactive_bg: Option<String>,
     pub active_row_bg: Option<String>,
     pub selection_bg: Option<String>,
     pub surface0: Option<String>,
@@ -132,6 +133,7 @@ pub struct ModeThemeColors {
     pub accent: Option<String>,
     pub panel_bg: Option<String>,
     pub sidebar_bg: Option<String>,
+    pub pane_inactive_bg: Option<String>,
     pub active_row_bg: Option<String>,
     pub selection_bg: Option<String>,
     pub surface0: Option<String>,
@@ -268,6 +270,30 @@ light_name = "lattee"
         for value in ["reset", "default", "none", "transparent"] {
             assert_eq!(parse_color(value), Color::Reset, "value: {value}");
         }
+    }
+
+    #[test]
+    fn pane_inactive_bg_fields_parse_in_common_and_modes() {
+        let config: Config = toml::from_str(
+            r##"
+[theme.custom]
+pane_inactive_bg = "#181825"
+[theme.custom.light]
+pane_inactive_bg = "reset"
+[theme.custom.dark]
+accent = "blue"
+"##,
+        )
+        .unwrap();
+        let custom = config.theme.custom.unwrap();
+        assert_eq!(custom.pane_inactive_bg.as_deref(), Some("#181825"));
+        assert_eq!(
+            custom.light.unwrap().pane_inactive_bg.as_deref(),
+            Some("reset")
+        );
+        assert!(custom.dark.unwrap().pane_inactive_bg.is_none());
+        let absent: Config = toml::from_str("[theme]\nname = \"terminal\"\n").unwrap();
+        assert!(absent.theme.custom.is_none());
     }
 
     #[test]

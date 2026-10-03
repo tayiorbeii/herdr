@@ -276,6 +276,7 @@ You can override individual colors:
 ```toml
 [theme.custom]
 sidebar_bg = "#181825"
+pane_inactive_bg = "#11111b"
 active_row_bg = "#1e1e2e"
 selection_bg = "#313244"
 panel_bg = "reset"
@@ -288,6 +289,8 @@ yellow = "#f9e2af"
 
 `sidebar_bg` optionally gives the desktop sidebar its own background. When omitted, the sidebar keeps the host terminal background. `active_row_bg` changes the active Space and focused Agent row background without affecting separators or scrollbar tracks. `selection_bg` changes the Navigate-mode cursor row background in the sidebar.
 
+`pane_inactive_bg` optionally tints the terminal-default background of unfocused panes so the focused pane stands out. Only cells that have no explicit ANSI background change, including blank space; programs' own backgrounds, reverse video, and selections are unchanged, and a program that sets its own default background (OSC 11) keeps it. The focused pane, popups, borders, and the sidebar never change. When omitted, panes look exactly as before; reset aliases leave the terminal default.
+
 Color values accept hex, named colors, `rgb(r,g,b)`, or reset aliases like `reset`, `default`, `none`, and `transparent`.
 
 When `auto_switch` is enabled, optional light and dark subtables layer on top of the shared custom colors:
@@ -297,10 +300,12 @@ When `auto_switch` is enabled, optional light and dark subtables layer on top of
 accent = "#89b4fa"
 
 [theme.custom.light]
+pane_inactive_bg = "#e6e9ef"
 panel_bg = "#eff1f5"
 text = "#4c4f69"
 
 [theme.custom.dark]
+pane_inactive_bg = "#11111b"
 panel_bg = "#1e1e2e"
 text = "#cdd6f4"
 ```

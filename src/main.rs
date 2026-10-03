@@ -85,6 +85,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Accepts: hex (#rrggbb), named colors, rgb(r,g,b), or panel_bg = "reset"
 # [theme.custom]
 # sidebar_bg = "#181825"
+# Unfocused panes only; tints terminal-default backgrounds, never program colors.
+# pane_inactive_bg = "#11111b"
 # active_row_bg = "#1e1e2e"
 # selection_bg = "#313244"
 # panel_bg = "reset"
@@ -94,10 +96,12 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 
 # Layer appearance-specific overrides on top when auto_switch is enabled.
 # [theme.custom.light]
+# pane_inactive_bg = "#e6e9ef"
 # panel_bg = "#eff1f5"
 # text = "#4c4f69"
 #
 # [theme.custom.dark]
+# pane_inactive_bg = "#11111b"
 # panel_bg = "#1e1e2e"
 # text = "#cdd6f4"
 

@@ -272,6 +272,7 @@ dark_name = "catppuccin"
 ```toml
 [theme.custom]
 sidebar_bg = "#181825"
+pane_inactive_bg = "#11111b"
 active_row_bg = "#1e1e2e"
 selection_bg = "#313244"
 panel_bg = "reset"
@@ -284,6 +285,8 @@ yellow = "#f9e2af"
 
 `sidebar_bg` を使うと、デスクトップのサイドバーだけに背景色を設定できます。省略した場合、サイドバーはホストターミナルの背景を使います。`active_row_bg` は、区切り線やスクロールバートラックに影響を与えず、アクティブな Space とフォーカス中の Agent 行の背景色を変更します。`selection_bg` は、サイドバーの Navigate モードのカーソル行の背景色を変更します。
 
+`pane_inactive_bg` を設定すると、フォーカスしていないペインのターミナル既定背景だけを着色し、フォーカス中のペインを目立たせられます。明示的な ANSI 背景色を持たないセル（空白を含む）だけが変わり、プログラム自身の背景色、反転表示、選択範囲は変わりません。OSC 11 で独自の既定背景を設定したプログラムもその色を維持します。フォーカス中のペイン、ポップアップ、枠線、サイドバーは変わりません。省略すると従来どおりの表示になり、リセットエイリアスはターミナルの既定色のままにします。
+
 色の値には、hex、名前付きの色、`rgb(r,g,b)`、または `reset`、`default`、`none`、`transparent` のようなリセットエイリアスが使えます。
 
 `auto_switch` が有効な場合は、ライト/ダーク別のサブテーブルを共有カスタム色の上に重ねられます:
@@ -293,10 +296,12 @@ yellow = "#f9e2af"
 accent = "#89b4fa"
 
 [theme.custom.light]
+pane_inactive_bg = "#e6e9ef"
 panel_bg = "#eff1f5"
 text = "#4c4f69"
 
 [theme.custom.dark]
+pane_inactive_bg = "#11111b"
 panel_bg = "#1e1e2e"
 text = "#cdd6f4"
 ```

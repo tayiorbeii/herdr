@@ -344,6 +344,9 @@ impl ClientShellState {
             frame.cells[start..start + usize::from(bar.width)].to_vec()
         });
         blit_pane_surface(&mut frame, &surface.frame, layout.pane_surface);
+        if let Some(tint) = inactive_pane_tint(&self.config.palette) {
+            paint_inactive_pane_default_background(&mut frame, surface, layout.pane_surface, tint);
+        }
         restore_mode_bar(&mut frame, mode_bar, mode_bar_cells.as_deref());
         let mut occlusion = crate::kitty_graphics::surface::Occlusion::default();
         let has_selection = self
@@ -722,6 +725,86 @@ impl ClientShellState {
         }
         let graphics = self.compose_graphics(layout, &occlusion);
         Some(crate::client::frame_output::ComposedFrame { frame, graphics })
+    }
+}
+
+/// Packed `pane_inactive_bg` tint, or None when the baseline applies (unset or Reset).
+pub(super) fn inactive_pane_tint(palette: &crate::app::state::Palette) -> Option<u32> {
+    palette
+        .pane_inactive_bg
+        .filter(|bg| *bg != ratatui::style::Color::Reset)
+        .map(crate::protocol::color_to_u32)
+}
+
+/// Pane-agnostic cell rule shared by full composition and retained surface patches: a
+/// terminal-default (`Reset`) background takes the tint. Callers select cells inside unfocused
+/// panes' `inner_rect` once per pane or row span. The server sends explicit ANSI backgrounds as
+/// indexed/RGB and resolves reverse video to a concrete color, so only default cells match.
+fn tint_default_background_cell(cell: &mut crate::protocol::CellData, tint: u32) {
+    if cell.bg == crate::protocol::color_to_u32(ratatui::style::Color::Reset) {
+        cell.bg = tint;
+    }
+}
+
+/// Tints one retained patch row starting at surface-relative `(x, y)`: unfocused pane spans
+/// crossing the row are found once per row, then only their cells are visited.
+pub(super) fn tint_inactive_pane_row(
+    panes: &[crate::protocol::PaneSurfacePane],
+    x: u16,
+    y: u16,
+    cells: &mut [crate::protocol::CellData],
+    tint: u32,
+) {
+    let row_end = usize::from(x) + cells.len();
+    for pane in panes.iter().filter(|pane| !pane.focused) {
+        let inner = pane.inner_rect;
+        if y < inner.y || y >= inner.y.saturating_add(inner.height) {
+            continue;
+        }
+        let start = usize::from(inner.x).max(usize::from(x));
+        let end = (usize::from(inner.x) + usize::from(inner.width)).min(row_end);
+        if start >= end {
+            continue;
+        }
+        let offset = usize::from(x);
+        for cell in &mut cells[start - offset..end - offset] {
+            tint_default_background_cell(cell, tint);
+        }
+    }
+}
+
+/// Tints default backgrounds inside unfocused panes after the surface blit. Selection and copy
+/// highlights are painted afterwards.
+fn paint_inactive_pane_default_background(
+    frame: &mut FrameData,
+    surface: &crate::protocol::PaneSurfaceFrame,
+    area: Rect,
+    tint: u32,
+) {
+    let width = usize::from(frame.width);
+    // Only cells copied from the surface by `blit_pane_surface`.
+    let area = Rect::new(
+        area.x,
+        area.y,
+        surface.frame.width.min(area.width),
+        surface.frame.height.min(area.height),
+    );
+    for pane in surface.panes.iter().filter(|pane| !pane.focused) {
+        let inner = Rect::new(
+            area.x.saturating_add(pane.inner_rect.x),
+            area.y.saturating_add(pane.inner_rect.y),
+            pane.inner_rect.width,
+            pane.inner_rect.height,
+        )
+        .intersection(area);
+        for y in inner.top()..inner.bottom() {
+            let row = usize::from(y) * width;
+            for x in inner.left()..inner.right() {
+                if let Some(cell) = frame.cells.get_mut(row + usize::from(x)) {
+                    tint_default_background_cell(cell, tint);
+                }
+            }
+        }
     }
 }
 
