@@ -934,6 +934,48 @@ impl<'de> Deserialize<'de> for PaneBordersConfig {
     }
 }
 
+/// Sidebar section padding in terminal cells. Malformed values are kept so they can be
+/// reported and disable only this override instead of invalidating `[ui]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SidebarPaddingCells(Result<u16, String>);
+
+impl Default for SidebarPaddingCells {
+    fn default() -> Self {
+        Self(Ok(0))
+    }
+}
+
+impl SidebarPaddingCells {
+    pub fn cells(&self) -> u16 {
+        self.0.as_ref().copied().unwrap_or(0)
+    }
+
+    pub fn diagnostic(&self) -> Option<String> {
+        self.0.as_ref().err().map(|raw| {
+            format!(
+                "ui.sidebar_padding_cells = {raw} is not a whole number of cells from 0 to 65535; disabling sidebar padding"
+            )
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for SidebarPaddingCells {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = toml::Value::deserialize(deserializer)?;
+        Ok(Self(match &value {
+            toml::Value::Integer(cells) => u16::try_from(*cells).map_err(|_| value.to_string()),
+            toml::Value::Float(_) | toml::Value::Boolean(_) | toml::Value::String(_) => {
+                Err(value.to_string())
+            }
+            toml::Value::Array(_) => Err("an array".into()),
+            other => Err(format!("a {}", other.type_str())),
+        }))
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct UiConfig {
@@ -946,6 +988,8 @@ pub struct UiConfig {
     pub sidebar_start_collapsed: bool,
     /// Collapsed sidebar presentation. Default: compact.
     pub sidebar_collapsed_mode: SidebarCollapsedModeConfig,
+    /// Empty cells inside each expanded sidebar section, per side. Default: 0.
+    pub sidebar_padding_cells: SidebarPaddingCells,
     /// Terminal width at or below which Herdr uses the mobile single-column layout. Default: 64.
     pub mobile_width_threshold: u16,
     /// Capture mouse input for Herdr's mouse UI. Default: true.
@@ -1200,6 +1244,7 @@ impl Default for UiConfig {
             sidebar_max_width: 36,
             sidebar_start_collapsed: false,
             sidebar_collapsed_mode: SidebarCollapsedModeConfig::Compact,
+            sidebar_padding_cells: SidebarPaddingCells::default(),
             mobile_width_threshold: DEFAULT_MOBILE_WIDTH_THRESHOLD,
             mouse_capture: true,
             copy_on_select: true,
@@ -1854,6 +1899,48 @@ mouse_scroll_lines = 1
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.ui.mouse_scroll_lines(), 1);
+    }
+
+    #[test]
+    fn sidebar_padding_cells_defaults_to_zero_and_parses() {
+        let default_config = Config::default();
+        assert_eq!(default_config.ui.sidebar_padding_cells.cells(), 0);
+        assert_eq!(default_config.ui.sidebar_padding_cells.diagnostic(), None);
+
+        for (raw, cells) in [("0", 0), ("2", 2), ("65535", u16::MAX)] {
+            let config: Config =
+                toml::from_str(&format!("[ui]\nsidebar_padding_cells = {raw}\n")).unwrap();
+            assert_eq!(config.ui.sidebar_padding_cells.cells(), cells);
+            assert!(config.collect_diagnostics().is_empty());
+        }
+    }
+
+    #[test]
+    fn sidebar_padding_cells_malformed_value_disables_only_that_field() {
+        for (raw, shown) in [
+            ("-1", "-1"),
+            ("65536", "65536"),
+            ("1.5", "1.5"),
+            ("true", "true"),
+            ("\"2\"", "\"2\""),
+            ("[1]", "an array"),
+            ("{ cells = 1 }", "a table"),
+        ] {
+            let config: Config = toml::from_str(&format!(
+                "[ui]\nsidebar_padding_cells = {raw}\nsidebar_width = 30\n"
+            ))
+            .unwrap_or_else(|err| panic!("{raw} must not invalidate [ui]: {err}"));
+            assert_eq!(config.ui.sidebar_padding_cells.cells(), 0, "{raw}");
+            assert_eq!(config.ui.sidebar_width, 30, "{raw}");
+            let expected = format!(
+                "ui.sidebar_padding_cells = {shown} is not a whole number of cells from 0 to 65535; disabling sidebar padding"
+            );
+            assert_eq!(
+                config.ui.sidebar_padding_cells.diagnostic().as_deref(),
+                Some(expected.as_str())
+            );
+            assert_eq!(config.collect_diagnostics(), vec![expected]);
+        }
     }
 
     #[test]

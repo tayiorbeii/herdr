@@ -245,6 +245,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Collapsed sidebar presentation: "compact" keeps the narrow status rail, "hidden" uses zero width.
 # sidebar_collapsed_mode = "compact"
 
+# Empty cells inside each expanded sidebar section, on every side (0-65535).
+# Shrinks only to keep one usable cell; the sidebar width does not change.
+# sidebar_padding_cells = 0
+
 # Terminal width at or below which Herdr uses the mobile single-column layout.
 # Increase this for foldables, tablets, or wide phone terminals.
 # mobile_width_threshold = 64

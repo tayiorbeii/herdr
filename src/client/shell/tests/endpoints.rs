@@ -2690,3 +2690,64 @@ fn navigator_foreign_workspace_heading_keeps_the_workspace_target() {
         }] if activated == &endpoint_id && workspace_id == "ws_1"
     ));
 }
+
+#[test]
+fn endpoint_sidebar_padding_insets_machines_and_agents() {
+    let frame_text = |frame: &crate::protocol::FrameData, x: u16, y: u16, width: u16| {
+        (x..x + width)
+            .map(|column| {
+                frame.cells[(y * frame.width + column) as usize]
+                    .symbol
+                    .as_str()
+            })
+            .collect::<String>()
+    };
+    let mut states = Vec::new();
+    for padding in [0, 2] {
+        let (mut state, _) = state_with_remote();
+        let mut local = snapshot();
+        local
+            .agents
+            .push(agent("first", crate::api::schema::AgentStatus::Idle, 1));
+        state.set_snapshot(Box::new(local));
+        state.config.sidebar_padding_cells = padding;
+        states.push(state);
+    }
+    let baseline_frame = states[0].compose(100, 28).expect("baseline endpoint frame");
+    assert_eq!(frame_text(&baseline_frame, 0, 0, 9), " machines");
+    assert_eq!(states[0].hits.workspace_body, Rect::new(0, 2, 25, 11));
+    assert_eq!(states[0].hits.agent_body, Rect::new(0, 17, 25, 11));
+    assert!(states[0].hits.machines.iter().all(|hit| hit.rect.x == 0));
+
+    let state = &mut states[1];
+    let frame = state.compose(100, 28).expect("padded endpoint frame");
+    let hits = &state.hits;
+    // machines section (0,0,25,14) -> (2,2,21,10); agents content (0,15,25,13) -> (2,17,21,9).
+    assert_eq!(frame_text(&frame, 2, 2, 9), " machines");
+    assert_eq!(hits.workspace_body, Rect::new(2, 4, 21, 7));
+    assert!(!hits.machines.is_empty());
+    for hit in &hits.machines {
+        assert_eq!(hit.rect.x, 2);
+        assert!(hit.rect.right() <= 23);
+        assert!(hit.rect.y >= 4 && hit.rect.bottom() <= 11);
+    }
+    assert_eq!(hits.sidebar_section_divider, Rect::new(0, 14, 25, 1));
+    assert_eq!(frame_text(&frame, 0, 14, 25), "─".repeat(25));
+    assert_eq!(frame_text(&frame, 2, 17, 7), " agents");
+    assert_eq!(hits.agent_body, Rect::new(2, 19, 21, 7));
+    assert!(!hits.endpoint_agents.is_empty());
+    for (rect, _, _) in &hits.endpoint_agents {
+        assert_eq!(rect.x, 2);
+        assert!(rect.right() <= 23 && rect.bottom() <= 26);
+    }
+    assert_eq!(hits.sidebar_toggle, Rect::new(24, 27, 1, 1));
+    for y in 0..28 {
+        for x in 26..100 {
+            let index = (y * 100 + x) as usize;
+            assert_eq!(
+                frame.cells[index], baseline_frame.cells[index],
+                "pane cell ({x},{y})"
+            );
+        }
+    }
+}
