@@ -122,6 +122,7 @@ impl ClientShellConfig {
             tab_bar_position: config.ui.tab_bar_position,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
             rounded_borders: config.ui.rounded_borders,
+            sidebar_padding_cells: config.ui.sidebar_padding_cells.cells(),
             spaces: config.ui.sidebar.spaces.clone(),
             agents: config.ui.sidebar.agents.clone(),
             agent_panel_sort: config.ui.agent_panel_sort,
@@ -317,6 +318,7 @@ impl ClientShellConfig {
             } else {
                 let ui = &config.ui;
                 diagnostics.extend(ui.sound.diagnostics());
+                diagnostics.extend(ui.sidebar_padding_cells.diagnostic());
                 self.sidebar_width = ui.sidebar_width;
                 self.sidebar_min_width = ui.sidebar_min_width;
                 self.sidebar_max_width = ui.sidebar_max_width;
@@ -325,6 +327,7 @@ impl ClientShellConfig {
                 self.tab_bar_position = ui.tab_bar_position;
                 self.hide_tab_bar_when_single_tab = ui.hide_tab_bar_when_single_tab;
                 self.rounded_borders = ui.rounded_borders;
+                self.sidebar_padding_cells = ui.sidebar_padding_cells.cells();
                 self.spaces = ui.sidebar.spaces.clone();
                 self.agents = ui.sidebar.agents.clone();
                 self.agent_panel_sort = ui.agent_panel_sort;
@@ -663,6 +666,50 @@ popup_bg = "default"
             std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         }
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn sidebar_padding_loads_reloads_and_removes_without_layout_changes() {
+        let default = Config::default();
+        let mut shell = ClientShellConfig::from_config(&default);
+        assert_eq!(shell.sidebar_padding_cells, 0);
+        let baseline = shell.initial_surface_size(120, 40);
+        let padded: Config = toml::from_str("[ui]\nsidebar_padding_cells = 2\n").unwrap();
+        assert_eq!(
+            ClientShellConfig::from_config(&padded).sidebar_padding_cells,
+            2
+        );
+        assert!(shell.apply_live_config(&padded, &[], &[]).is_empty());
+        assert_eq!(shell.sidebar_padding_cells, 2);
+        assert_eq!(shell.initial_surface_size(120, 40), baseline);
+        assert!(shell.apply_live_config(&default, &[], &[]).is_empty());
+        assert_eq!(shell.sidebar_padding_cells, 0);
+        assert_eq!(shell.initial_surface_size(120, 40), baseline);
+    }
+
+    #[test]
+    fn sidebar_padding_malformed_reload_reports_field_and_applies_rest_of_ui() {
+        let padded: Config = toml::from_str("[ui]\nsidebar_padding_cells = 3\n").unwrap();
+        let mut shell = ClientShellConfig::from_config(&padded);
+        let malformed: Config =
+            toml::from_str("[ui]\nsidebar_padding_cells = \"wide\"\nsidebar_width = 31\n").unwrap();
+        let diagnostics = shell.apply_live_config(&malformed, &[], &[]);
+        assert_eq!(
+            diagnostics,
+            vec![
+                "ui.sidebar_padding_cells = \"wide\" is not a whole number of cells from 0 to 65535; disabling sidebar padding"
+                    .to_string()
+            ]
+        );
+        assert_eq!(shell.sidebar_padding_cells, 0);
+        assert_eq!(shell.sidebar_width, 31);
+
+        shell.apply_live_config(&padded, &[], &[]);
+        shell.apply_live_config(&Config::default(), &[], &["ui".into()]);
+        assert_eq!(
+            shell.sidebar_padding_cells, 3,
+            "an invalid [ui] keeps the preference"
+        );
     }
 
     #[test]
