@@ -19,8 +19,8 @@ pub(crate) use self::onboarding::{
 pub(crate) use self::panes::popup_pane_rects;
 use self::panes::resize_popup_pane;
 pub(crate) use self::panes::{
-    apply_pane_spacing, pane_inner_rect, pane_is_scrolled_back, render_selection_highlight,
-    PaneGaps, PaneSpacing,
+    apply_pane_spacing, pad_pane_content, pane_inner_rect, pane_is_scrolled_back,
+    render_selection_highlight, PaneGaps, PaneSpacing,
 };
 pub(crate) use self::release_notes::{
     product_announcement_display_lines, product_announcement_scroll_metrics,
