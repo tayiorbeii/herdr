@@ -1204,6 +1204,122 @@ mod tests {
         }
     }
 
+    /// B1 x S1/S2-pane: corner detection compares each pane's published rect with its
+    /// content rect. Gaps keep one rounded frame per pane, padding inside a frame does not
+    /// move the corners, and padding without frames (content rect inset, corner cells
+    /// blank) rounds nothing.
+    #[tokio::test(flavor = "current_thread")]
+    async fn rounded_borders_follow_pane_gap_cells_and_pane_padding() {
+        let build = || rounded_test_workspace(2, false);
+        let ui = |toml_text: &'static str| {
+            move |config: &mut crate::config::Config| {
+                let parsed: crate::config::Config = toml::from_str(toml_text).expect("ui config");
+                config.ui = parsed.ui;
+            }
+        };
+        let arcs = |changes: &Vec<((u16, u16), String, String)>| {
+            let mut arcs: Vec<&str> = changes.iter().map(|(_, _, after)| after.as_str()).collect();
+            arcs.sort_unstable();
+            arcs.concat()
+        };
+        let plain = rounded_corner_changes(build, ui("[ui]\n"));
+        assert_eq!(arcs(&plain), "╭╭╮╮╯╯╰╰");
+        for spaced in [
+            "[ui]\npane_gap_cells = 2\n",
+            "[ui]\npane_padding_cells = 1\n",
+            "[ui]\npane_gap_cells = 2\npane_padding_cells = 1\n",
+        ] {
+            assert_eq!(
+                arcs(&rounded_corner_changes(build, ui(spaced))),
+                arcs(&plain),
+                "{spaced}"
+            );
+        }
+        assert_eq!(
+            arcs(&rounded_corner_changes(
+                build,
+                ui("[ui]\npane_gap_cells = 0\n")
+            )),
+            "╭╮╯╰",
+            "zero gap shares dividers: only the grid's outer corners round"
+        );
+        for frameless in [
+            "[ui]\npane_borders = \"off\"\npane_padding_cells = 1\n",
+            "[ui]\npane_borders = \"off\"\npane_gap_cells = 2\npane_padding_cells = 1\n",
+        ] {
+            assert!(
+                rounded_corner_changes(build, ui(frameless)).is_empty(),
+                "{frameless}"
+            );
+        }
+    }
+
+    /// Pane border styles x S1/S2-pane: arcs from `rounded` styles are emitted by the
+    /// server on the same corners B1 rounds, inside gap cells and padding. Gaps or padding
+    /// keep one rounded frame per pane, `pane_gap_cells = 0` shares dividers so only the
+    /// outer corners are arcs, frameless padding draws none, and B1 on top changes nothing.
+    /// Per state (inactive rounded, active heavy) only the unfocused frame is round.
+    #[tokio::test(flavor = "current_thread")]
+    async fn rounded_style_arcs_follow_pane_gap_cells_and_pane_padding() {
+        let build = || rounded_test_workspace(2, false);
+        let ui = |toml_text: &'static str, styles: [Option<&'static str>; 3]| {
+            move |config: &mut crate::config::Config| {
+                let parsed: crate::config::Config = toml::from_str(toml_text).expect("ui config");
+                config.ui = parsed.ui;
+                set_border_styles(config, styles[0], styles[1], styles[2]);
+            }
+        };
+        let rounded = [Some("rounded"), None, None];
+        let stock = [None, None, None];
+        for (spacing, arcs) in [
+            ("[ui]\n", "╭╭╮╮╯╯╰╰"),
+            ("[ui]\npane_gap_cells = 2\n", "╭╭╮╮╯╯╰╰"),
+            ("[ui]\npane_padding_cells = 1\n", "╭╭╮╮╯╯╰╰"),
+            (
+                "[ui]\npane_gap_cells = 2\npane_padding_cells = 1\n",
+                "╭╭╮╮╯╯╰╰",
+            ),
+            ("[ui]\npane_gap_cells = 0\n", "╭╮╯╰"),
+            ("[ui]\npane_borders = \"off\"\npane_padding_cells = 1\n", ""),
+            (
+                "[ui]\npane_borders = \"off\"\npane_gap_cells = 2\npane_padding_cells = 1\n",
+                "",
+            ),
+        ] {
+            let (server_arcs, server_and_client) = rounded_frame_pair(build, ui(spacing, rounded));
+            let (_, client_arcs) = rounded_frame_pair(build, ui(spacing, stock));
+            assert_eq!(
+                frame_glyphs(&server_arcs, ARCS),
+                sorted_glyphs(arcs),
+                "{spacing}"
+            );
+            assert_eq!(
+                server_arcs, server_and_client,
+                "B1 is idempotent: {spacing}"
+            );
+            assert_eq!(server_arcs, client_arcs, "server arcs = B1 arcs: {spacing}");
+        }
+        for spacing in [
+            "[ui]\npane_gap_cells = 2\n",
+            "[ui]\npane_padding_cells = 1\n",
+            "[ui]\npane_gap_cells = 2\npane_padding_cells = 1\n",
+        ] {
+            let per_state = [None, Some("heavy"), Some("rounded")];
+            let (server_only, with_client) = rounded_frame_pair(build, ui(spacing, per_state));
+            assert_eq!(server_only, with_client, "{spacing}");
+            assert_eq!(
+                frame_glyphs(&server_only, ARCS),
+                sorted_glyphs(ARCS),
+                "{spacing}"
+            );
+            assert_eq!(
+                frame_glyphs(&server_only, HEAVY_CORNERS),
+                sorted_glyphs(HEAVY_CORNERS),
+                "{spacing}"
+            );
+        }
+    }
+
     /// Two side-by-side panes, left focused, from a real `App::new(config)`.
     fn split_shell_app(
         config: &crate::config::Config,

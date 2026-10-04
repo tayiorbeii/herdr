@@ -364,6 +364,7 @@ How pane styles stack with other settings:
 | any style × pane titles | stacks; titles sit on the top edge |
 | any style × `pane_gaps` | stacks |
 | any style × `pane_gap_cells` | stacks; `pane_gap_cells = 0` shares dividers like `pane_gaps = false`, and N ≥ 1 gives every pane its own styled frame |
+| any style × `pane_padding_cells` | stacks; padding sits inside the frame and never changes its glyphs, and `rounded` arcs stay on the frame corners |
 | rounded corners × heavy or double | Unicode has no heavy or double arcs, so heavy and double corners stay square |
 | dashed × corners and junctions | only straight runs are dashed; corners, T-junctions and crosses are solid in the matching weight |
 | different styles at a shared divider (`pane_gaps = false` or `pane_gap_cells = 0`) | the focused pane's style wins on its frame, like the focus color. Junctions use the exact mixed glyph where Unicode has one (every light/heavy mix, and light/double mixes split across the two axes); otherwise a junction with a double arm is drawn entirely double. A dashed segment shared with a solid style takes the winner's style |
@@ -374,6 +375,8 @@ How pane styles stack with other settings:
 Block-character frames (quadrant, one-eighth and proportional blocks) are planned for a later release.
 
 Set `pane_gap_cells = N` under `[ui]` to choose the blank space between split panes, in terminal cells (0 to 65535). When set it overrides `pane_gaps`: `0` shares divider borders, and `N` leaves N empty cells between neighbouring pane frames, with the frame lines in addition; with `pane_borders = "off"` the N cells separate pane contents. The space comes from the left or upper pane at each split; outer edges, the sidebar and pane interiors are unchanged. In a small window the gap shrinks only as far as needed to keep one usable row and column in each pane, and returns when the window grows. Leave it unset to keep the `pane_gaps` behavior; a malformed value is reported and ignored.
+
+Set `pane_padding_cells = 2` under `[ui]` to keep two empty cells between each pane's frame and its terminal content on every side. This works with borders off too; the padding then insets the content from the pane edge. Terminal dimensions and mouse positions follow the padded area, and the scrollbar keeps its own column. On small panes the padding shrinks so the terminal keeps at least 4 columns and 2 rows; a pane already smaller than that gets no padding on that axis. The default `0` keeps the existing layout, and the setting does not change pane gaps or the sidebar. An invalid value disables only this setting and reports a config diagnostic.
 
 Set `tab_bar_position = "bottom"` under `[ui]` to place the desktop tab row below the terminal panes. Prefix, Navigate, Copy, and Resize mode bars temporarily replace the bottom tab row while active. The default is `"top"`.
 

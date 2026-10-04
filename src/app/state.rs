@@ -993,6 +993,8 @@ pub struct AppState {
     pub pane_border_styles: crate::config::PaneBorderStyles,
     /// Valid `ui.pane_gap_cells` override; `None` keeps the legacy `pane_gaps` path.
     pub pane_gap_cells: Option<u16>,
+    /// Effective `ui.pane_padding_cells`; 0 keeps the unpadded content rect.
+    pub pane_padding_cells: u16,
     pub show_agent_labels_on_pane_borders: bool,
     pub tab_bar_right: Vec<TabBarStatusSegment>,
     pub tab_bar_right_separator: String,
@@ -1245,6 +1247,7 @@ impl AppState {
             pane_gaps: false,
             pane_border_styles: crate::config::PaneBorderStyles::default(),
             pane_gap_cells: None,
+            pane_padding_cells: 0,
             show_agent_labels_on_pane_borders: false,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: " ".into(),

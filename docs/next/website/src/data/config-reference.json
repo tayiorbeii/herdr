@@ -1171,6 +1171,12 @@
           "description": "Blank cells between neighbouring split panes (0-65535). When set it overrides pane_gaps: 0 shares dividers, N leaves N empty cells between pane frames (frame lines are extra) or between pane contents with borders off. Small windows use a smaller gap only while needed to keep every pane usable; malformed values are reported and ignored."
         },
         {
+          "key": "ui.pane_padding_cells",
+          "type": "integer",
+          "default": "0",
+          "description": "Empty terminal cells (0 to 65535) between each pane's frame or edge and its terminal content, on every side. The scrollbar stays in its own column. On small panes the padding shrinks so the terminal keeps at least 4 columns and 2 rows. An invalid value disables only this setting."
+        },
+        {
           "key": "ui.show_agent_labels_on_pane_borders",
           "type": "boolean",
           "default": "false",
