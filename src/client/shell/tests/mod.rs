@@ -252,6 +252,7 @@ mod copy;
 mod endpoint_requests;
 mod endpoints;
 mod graphics;
+mod inactive_pane_bg;
 #[path = "input.rs"]
 mod input_domain;
 mod keybindings_settings;

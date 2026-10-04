@@ -282,6 +282,7 @@ pane_border_inactive = "#6c7086"
 sidebar_bg = "#181825"
 popup_bg = "#181825"
 popup_border = "#89b4fa"
+pane_inactive_bg = "#11111b"
 active_row_bg = "#1e1e2e"
 selection_bg = "#313244"
 panel_bg = "reset"
@@ -300,6 +301,8 @@ yellow = "#f9e2af"
 
 `popup_bg` and `popup_border` style terminal popups opened by popup commands or plugin panes with `placement = "popup"`. `popup_bg` paints blank popup cells and popup terminal cells that use the default background; backgrounds the program sets explicitly are kept. `popup_border` colors the popup border and its title. If omitted, the popup frame keeps the resolved `panel_bg` background and `accent` border, and popup terminal cells keep the terminal default background. Reset aliases explicitly use terminal defaults; they do not mean inheritance. Panes, tabs, overlays and other `accent` uses are unchanged.
 
+`pane_inactive_bg` optionally tints the terminal-default background of unfocused panes so the focused pane stands out. Only cells that have no explicit ANSI background change, including blank space; programs' own backgrounds, reverse video, and selections are unchanged, and a program that sets its own default background (OSC 11) keeps it. The focused pane, popups, borders, and the sidebar never change. When omitted, panes look exactly as before; reset aliases leave the terminal default.
+
 Color values accept hex (`#rgb` or `#rrggbb`), named colors, `rgb(r,g,b)`, or reset aliases like `reset`, `default`, `none`, and `transparent`.
 
 When `auto_switch` is enabled, optional light and dark subtables layer on top of the shared custom colors:
@@ -313,6 +316,7 @@ active_tab_fg = "#eff1f5"
 active_tab_bg = "#1e66f5"
 pane_border_active = "#1e66f5"
 popup_border = "#1e66f5"
+pane_inactive_bg = "#e6e9ef"
 panel_bg = "#eff1f5"
 text = "#4c4f69"
 
@@ -321,6 +325,7 @@ active_tab_fg = "#181825"
 active_tab_bg = "#89b4fa"
 pane_border_active = "#89b4fa"
 popup_border = "#89b4fa"
+pane_inactive_bg = "#11111b"
 panel_bg = "#1e1e2e"
 text = "#cdd6f4"
 ```
@@ -370,6 +375,7 @@ How pane styles stack with other settings:
 | pane styles × `sidebar_padding_cells` | independent; sidebar padding only moves sidebar content and never touches pane frames |
 | any style × `pane_title_tokens` | stacks; composed titles replace top-edge cells with their token colors and the focus bold, and the edge after the title keeps the pane's style, dashes included |
 | any style × `pane_border_identity_token` | stacks; the glyph comes from the pane's style and the color from identity or focus, independently. The focused pane wins both its style and its color on shared dividers |
+| any style × `pane_inactive_bg` (theme key) | stacks; the tint fills the content of unfocused panes and leaves frame glyphs and colors unchanged |
 | rounded corners × heavy or double | Unicode has no heavy or double arcs, so heavy and double corners stay square |
 | dashed × corners and junctions | only straight runs are dashed; corners, T-junctions and crosses are solid in the matching weight |
 | different styles at a shared divider (`pane_gaps = false` or `pane_gap_cells = 0`) | the focused pane's style wins on its frame, like the focus color. Junctions use the exact mixed glyph where Unicode has one (every light/heavy mix, and light/double mixes split across the two axes); otherwise a junction with a double arm is drawn entirely double. A dashed segment shared with a solid style takes the winner's style |
