@@ -83,8 +83,6 @@ fn row_uses(row: &[AgentSidebarToken], token: AgentSidebarToken) -> bool {
     row.iter().any(|configured| *configured.parts().0 == token)
 }
 
-// Resolves the configured row with the sidebar resolver against server-side pane data.
-// Status and machine tokens are client presentation, so they resolve as missing here.
 fn composed_pane_border_title(
     app: &AppState,
     ws: &crate::workspace::Workspace,
@@ -95,6 +93,25 @@ fn composed_pane_border_title(
     if info.rect.width <= 4 {
         return None;
     }
+    let resolved = resolve_pane_tokens(app, ws, info, terminal, row);
+    compose_title_spans(
+        &resolved,
+        pane_border_title_base_style(&app.palette, info.is_focused),
+        info.is_focused,
+        info.rect.width.saturating_sub(4) as usize,
+    )
+}
+
+// Resolves a configured row with the sidebar resolver against server-side pane data and keeps
+// tokens with visible text. Status and machine tokens are client presentation, so they resolve
+// as missing here.
+fn resolve_pane_tokens(
+    app: &AppState,
+    ws: &crate::workspace::Workspace,
+    info: &PaneInfo,
+    terminal: &crate::terminal::TerminalState,
+    row: &[AgentSidebarToken],
+) -> Vec<ResolvedToken> {
     let workspace = if row_uses(row, AgentSidebarToken::Workspace) {
         ws.display_name_from_terminals(&app.terminals)
     } else {
@@ -132,7 +149,7 @@ fn composed_pane_border_title(
         canonical_agent: None,
         tokens: &terminal.metadata_tokens,
     };
-    let resolved = sidebar_agent_row(row, &context, "")
+    sidebar_agent_row(row, &context, "")
         .into_iter()
         .filter(|token| {
             token
@@ -140,13 +157,66 @@ fn composed_pane_border_title(
                 .text_value()
                 .is_some_and(|text| !text.trim().is_empty())
         })
-        .collect::<Vec<_>>();
-    compose_title_spans(
-        &resolved,
-        pane_border_title_base_style(&app.palette, info.is_focused),
-        info.is_focused,
-        info.rect.width.saturating_sub(4) as usize,
-    )
+        .collect()
+}
+
+// Unfocused pane frame colour. Every inactive line fallback goes through here.
+fn pane_border_inactive_color(palette: &Palette) -> Color {
+    palette.overlay0
+}
+
+// An unfocused pane's identity line colour: the configured token's explicit fg when the token
+// resolves to visible text. Focused panes skip resolution because focus owns their cells.
+fn pane_border_identity_color(
+    app: &AppState,
+    ws: &crate::workspace::Workspace,
+    info: &PaneInfo,
+    token: &AgentSidebarToken,
+) -> Option<Color> {
+    if info.is_focused {
+        return None;
+    }
+    let terminal = ws
+        .pane_state(info.id)
+        .and_then(|pane| app.terminals.get(&pane.attached_terminal_id))?;
+    resolve_pane_tokens(app, ws, info, terminal, std::slice::from_ref(token))
+        .first()?
+        .style
+        .fg
+        .map(|fg| fg.ratatui())
+}
+
+// Line colour from one walk over the cell's owners (the panes `line_touches_pane` accepts):
+// any focused owner wins with accent; otherwise the cell takes an identity colour only when
+// every owner has one and they agree, else the inactive fallback.
+fn identity_line_color(
+    palette: &Palette,
+    pane_infos: &[PaneInfo],
+    identities: &[Option<Color>],
+    x: u16,
+    y: u16,
+    pane_gaps: bool,
+) -> Color {
+    let mut agreed = None;
+    let mut neutral = false;
+    for (info, identity) in pane_infos.iter().zip(identities) {
+        if !line_touches_pane(x, y, info, pane_gaps) {
+            continue;
+        }
+        if info.is_focused {
+            return palette.accent;
+        }
+        // Keep walking after a disagreement: a later owner may still be focused.
+        match (*identity, agreed) {
+            (Some(color), Some(agreed)) if color != agreed => neutral = true,
+            (Some(color), _) => agreed = Some(color),
+            (None, _) => neutral = true,
+        }
+    }
+    match agreed {
+        Some(color) if !neutral => color,
+        _ => pane_border_inactive_color(palette),
+    }
 }
 
 fn compose_title_spans(
@@ -863,6 +933,13 @@ fn render_pane_borders(
         None
     };
 
+    // Resolved once per pane per render; absent config keeps the plain focus/inactive choice.
+    let identities = app.pane_border_identity_token.as_ref().map(|token| {
+        pane_infos
+            .iter()
+            .map(|info| pane_border_identity_color(app, ws, info, token))
+            .collect::<Vec<_>>()
+    });
     let buf = frame.buffer_mut();
     let area = buf.area;
     for ((x, y), line) in cells {
@@ -873,9 +950,6 @@ fn render_pane_borders(
         {
             continue;
         }
-        let focused = pane_infos
-            .iter()
-            .any(|info| info.is_focused && line_touches_pane(x, y, info, pane_gaps.separate));
         // With heavy borders on, the focus cue steps up from heavy to double.
         let symbol = match (focus_frame, app.pane_heavy_borders) {
             (Some(focus_frame), false) => weighted_line_cell_symbol(
@@ -892,9 +966,25 @@ fn render_pane_borders(
         if symbol.is_empty() {
             continue;
         }
+        let color = match identities.as_deref() {
+            Some(identities) => identity_line_color(
+                &app.palette,
+                pane_infos,
+                identities,
+                x,
+                y,
+                pane_gaps.separate,
+            ),
+            None => {
+                let focused = pane_infos.iter().any(|info| {
+                    info.is_focused && line_touches_pane(x, y, info, pane_gaps.separate)
+                });
+                pane_border_color(&app.palette, focused)
+            }
+        };
         let cell = &mut buf[(x, y)];
         cell.set_symbol(symbol);
-        cell.set_style(Style::default().fg(pane_border_color(&app.palette, focused)));
+        cell.set_style(Style::default().fg(color));
     }
 
     render_pane_border_titles(app, ws, pane_infos, frame);
@@ -4152,5 +4242,316 @@ mod tests {
         let buffer = render_title_tab(&app, area);
         assert_eq!(buffer[(0, 0)].symbol(), "┌");
         assert_eq!(row_text(&buffer, 0, 1..9), " zoomed ");
+    }
+
+    const BUILD_FG: Color = Color::Rgb(0xa6, 0xe3, 0xa1);
+    const REVIEW_FG: Color = Color::Rgb(0xf9, 0xe2, 0xaf);
+
+    fn identity_token(token: &str) -> AgentSidebarToken {
+        title_row(&format!("[{token}]")).remove(0)
+    }
+
+    fn role_identity_token() -> AgentSidebarToken {
+        identity_token(
+            r##"{ token = "$role", rules = [{ equals = "build", fg = "#a6e3a1" }, { equals = "review", fg = "#f9e2af" }] }"##,
+        )
+    }
+
+    // Left pane `root` (focused) | right column split into `top` over `bottom`.
+    fn identity_test_app() -> (AppState, [PaneId; 3]) {
+        let mut app = AppState::test_new();
+        let mut workspace = Workspace::test_new("repo");
+        let root = workspace.tabs[0].root_pane;
+        let top = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        let bottom = workspace.test_split(ratatui::layout::Direction::Vertical);
+        workspace.tabs[0].layout.focus_pane(root);
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+        app.ensure_test_terminals();
+        (app, [root, top, bottom])
+    }
+
+    const IDENTITY_AREA: Rect = Rect::new(0, 0, 30, 12);
+
+    fn fg_at(buffer: &Buffer, x: u16, y: u16) -> Color {
+        buffer[(x, y)].fg
+    }
+
+    // Cells whose rendering differs between two buffers of the same area.
+    fn changed_cells(a: &Buffer, b: &Buffer) -> Vec<(u16, u16)> {
+        let area = a.area;
+        let mut changed = Vec::new();
+        for y in area.y..area.y + area.height {
+            for x in area.x..area.x + area.width {
+                if a[(x, y)] != b[(x, y)] {
+                    changed.push((x, y));
+                }
+            }
+        }
+        changed
+    }
+
+    fn on_perimeter(rect: Rect, x: u16, y: u16) -> bool {
+        let right = rect.x + rect.width - 1;
+        let bottom = rect.y + rect.height - 1;
+        let in_cols = (rect.x..=right).contains(&x);
+        let in_rows = (rect.y..=bottom).contains(&y);
+        (in_rows && (x == rect.x || x == right)) || (in_cols && (y == rect.y || y == bottom))
+    }
+
+    #[test]
+    fn pane_border_shared_cells_follow_focus_ownership() {
+        let (mut app, [_, top, bottom]) = identity_test_app();
+        let area = IDENTITY_AREA;
+        let top_rect = title_pane_rect(&app, area, top);
+        let bottom_rect = title_pane_rect(&app, area, bottom);
+        let divider_x = top_rect.x;
+        let shared_y = bottom_rect.y;
+        let mid_x = top_rect.x + top_rect.width / 2;
+        let accent = app.palette.accent;
+        let inactive = app.palette.overlay0;
+
+        // Shared dividers: one column owned by root and the right panes, one row owned by
+        // top and bottom; junctions are owned by every adjacent pane.
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(buffer[(divider_x, shared_y)].symbol(), "├");
+        assert_eq!(fg_at(&buffer, divider_x, shared_y), accent);
+        assert_eq!(fg_at(&buffer, divider_x, 2), accent);
+        assert_eq!(fg_at(&buffer, mid_x, shared_y), inactive);
+        assert_eq!(fg_at(&buffer, mid_x, 0), inactive);
+
+        // Any focused owner wins the shared cell; neighbours keep the inactive colour elsewhere.
+        app.workspaces[0].tabs[0].layout.focus_pane(top);
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(fg_at(&buffer, mid_x, shared_y), accent);
+        assert_eq!(fg_at(&buffer, divider_x, 2), accent);
+        assert_eq!(
+            fg_at(&buffer, mid_x, bottom_rect.y + bottom_rect.height - 1),
+            inactive
+        );
+        assert_eq!(fg_at(&buffer, 0, 2), inactive);
+    }
+
+    #[test]
+    fn pane_border_identity_absent_renders_baseline_buffer() {
+        let (mut app, panes) = identity_test_app();
+        for pane in panes {
+            set_tokens(title_terminal(&mut app, pane), &[("role", "build")]);
+        }
+        let baseline = render_title_tab(&app, IDENTITY_AREA);
+
+        // A configured token that is missing on every pane changes nothing.
+        app.pane_border_identity_token =
+            Some(identity_token(r##"{ token = "$absent", fg = "#a6e3a1" }"##));
+        assert_eq!(render_title_tab(&app, IDENTITY_AREA), baseline);
+    }
+
+    #[test]
+    fn pane_border_identity_colors_private_segments_and_neutral_shared_dividers() {
+        let (mut app, [root, top, bottom]) = identity_test_app();
+        set_tokens(title_terminal(&mut app, root), &[("role", "review")]);
+        set_tokens(title_terminal(&mut app, top), &[("role", "build")]);
+        set_tokens(title_terminal(&mut app, bottom), &[("role", "review")]);
+        title_terminal(&mut app, top).set_manual_label("api".into());
+        let area = IDENTITY_AREA;
+        let baseline = render_title_tab(&app, area);
+        let top_rect = title_pane_rect(&app, area, top);
+        let bottom_rect = title_pane_rect(&app, area, bottom);
+        let root_rect = title_pane_rect(&app, area, root);
+        let mid_x = top_rect.x + top_rect.width / 2;
+        let right_x = area.width - 1;
+        let shared_y = bottom_rect.y;
+        let bottom_y = area.height - 1;
+
+        app.pane_border_identity_token = Some(role_identity_token());
+        let buffer = render_title_tab(&app, area);
+
+        // Neighbours differ on their private segments.
+        assert_eq!(fg_at(&buffer, right_x, 2), BUILD_FG);
+        assert_eq!(fg_at(&buffer, right_x, shared_y + 2), REVIEW_FG);
+        assert_eq!(fg_at(&buffer, mid_x, bottom_y), REVIEW_FG);
+        // The divider and junctions they share stay neutral; cells the focused pane owns stay accent.
+        assert_eq!(fg_at(&buffer, mid_x, shared_y), app.palette.overlay0);
+        assert_eq!(fg_at(&buffer, right_x, shared_y), app.palette.overlay0);
+        assert_eq!(fg_at(&buffer, top_rect.x, 2), app.palette.accent);
+        assert_eq!(fg_at(&buffer, 0, 2), app.palette.accent);
+        // Only frame colours of the unfocused panes changed: no glyph, title or terminal cell.
+        for (x, y) in changed_cells(&baseline, &buffer) {
+            assert_eq!(buffer[(x, y)].symbol(), baseline[(x, y)].symbol());
+            assert!(
+                !on_perimeter(root_rect, x, y) || x >= top_rect.x,
+                "({x}, {y})"
+            );
+            assert!(
+                on_perimeter(top_rect, x, y) || on_perimeter(bottom_rect, x, y),
+                "({x}, {y})"
+            );
+            assert!(
+                !(y == 0 && (top_rect.x + 1..top_rect.x + 6).contains(&x)),
+                "title ({x}, {y})"
+            );
+        }
+        assert_eq!(
+            row_text(&buffer, 0, top_rect.x + 1..top_rect.x + 6),
+            " api "
+        );
+
+        // Owners that agree colour the shared divider too.
+        set_tokens(title_terminal(&mut app, top), &[("role", "review")]);
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(fg_at(&buffer, mid_x, shared_y), REVIEW_FG);
+        assert_eq!(fg_at(&buffer, top_rect.x, shared_y), app.palette.accent);
+
+        // With gaps every pane owns its whole frame.
+        set_tokens(title_terminal(&mut app, top), &[("role", "build")]);
+        app.pane_gaps = true;
+        let buffer = render_title_tab(&app, area);
+        let top_rect = title_pane_rect(&app, area, top);
+        let bottom_rect = title_pane_rect(&app, area, bottom);
+        let mid_x = top_rect.x + top_rect.width / 2;
+        assert_eq!(
+            fg_at(&buffer, mid_x, top_rect.y + top_rect.height - 1),
+            BUILD_FG
+        );
+        assert_eq!(fg_at(&buffer, mid_x, bottom_rect.y), REVIEW_FG);
+        assert_eq!(fg_at(&buffer, top_rect.x, 2), BUILD_FG);
+        assert_eq!(fg_at(&buffer, root_rect.x, 2), app.palette.accent);
+    }
+
+    #[test]
+    fn pane_border_identity_four_way_junction_follows_every_owner() {
+        // 2x2 grid: the centre junction is owned by all four panes.
+        let mut app = AppState::test_new();
+        let mut workspace = Workspace::test_new("repo");
+        let top_left = workspace.tabs[0].root_pane;
+        let top_right = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        let bottom_right = workspace.test_split(ratatui::layout::Direction::Vertical);
+        workspace.tabs[0].layout.focus_pane(top_left);
+        let bottom_left = workspace.test_split(ratatui::layout::Direction::Vertical);
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+        app.ensure_test_terminals();
+        let panes = [top_left, top_right, bottom_left, bottom_right];
+        let area = IDENTITY_AREA;
+        let centre = {
+            let rect = title_pane_rect(&app, area, bottom_right);
+            (rect.x, rect.y)
+        };
+        app.pane_border_identity_token = Some(role_identity_token());
+
+        let render = |app: &mut AppState, roles: [&str; 4], focus: PaneId| {
+            for (pane, role) in panes.iter().zip(roles) {
+                set_tokens(title_terminal(app, *pane), &[("role", role)]);
+            }
+            app.workspaces[0].tabs[0].layout.focus_pane(focus);
+            let buffer = render_title_tab(app, area);
+            assert_eq!(buffer[centre].symbol(), "┼");
+            fg_at(&buffer, centre.0, centre.1)
+        };
+
+        // Any focused owner wins, wherever it sits among disagreeing or unset owners.
+        for focus in panes {
+            for roles in [
+                ["build", "review", "none", "build"],
+                ["review", "build", "build", "none"],
+            ] {
+                assert_eq!(render(&mut app, roles, focus), app.palette.accent);
+            }
+        }
+        // The other three agreeing is not enough while the focused pane owns the cell.
+        assert_eq!(render(&mut app, ["build"; 4], top_left), app.palette.accent);
+        // Unfocused owners elsewhere: the right-edge junction between top_right and bottom_right.
+        let right_x = area.width - 1;
+        render(&mut app, ["build"; 4], top_left);
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(fg_at(&buffer, right_x, centre.1), BUILD_FG);
+        render(&mut app, ["build", "review", "build", "build"], top_left);
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(fg_at(&buffer, right_x, centre.1), app.palette.overlay0);
+    }
+
+    #[test]
+    fn pane_border_identity_focus_wins() {
+        let (mut app, [root, top, bottom]) = identity_test_app();
+        for pane in [root, top, bottom] {
+            set_tokens(title_terminal(&mut app, pane), &[("role", "build")]);
+        }
+        app.pane_border_identity_token = Some(role_identity_token());
+        let area = IDENTITY_AREA;
+        let right_x = area.width - 1;
+
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(fg_at(&buffer, 0, 2), app.palette.accent);
+        assert_eq!(fg_at(&buffer, right_x, 2), BUILD_FG);
+
+        app.workspaces[0].tabs[0].layout.focus_pane(top);
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(fg_at(&buffer, 0, 2), BUILD_FG);
+        assert_eq!(fg_at(&buffer, right_x, 2), app.palette.accent);
+        let shared_y = title_pane_rect(&app, area, bottom).y;
+        assert_eq!(fg_at(&buffer, right_x, shared_y), app.palette.accent);
+        assert_eq!(fg_at(&buffer, right_x, shared_y + 2), BUILD_FG);
+    }
+
+    #[test]
+    fn pane_border_identity_without_fg_keeps_inactive_color() {
+        let (mut app, [root, top, bottom]) = identity_test_app();
+        set_tokens(title_terminal(&mut app, root), &[("role", "build")]);
+        set_tokens(title_terminal(&mut app, top), &[("role", "other")]);
+        set_tokens(title_terminal(&mut app, bottom), &[("role", "   ")]);
+        let baseline = render_title_tab(&app, IDENTITY_AREA);
+
+        // No fg anywhere, a rule that does not match, and a blank value invent no colour.
+        for token in [
+            r#""$role""#,
+            r#"{ token = "$role", bold = true }"#,
+            r##"{ token = "$role", rules = [{ equals = "build", fg = "#a6e3a1" }] }"##,
+        ] {
+            app.pane_border_identity_token = Some(identity_token(token));
+            assert_eq!(render_title_tab(&app, IDENTITY_AREA), baseline, "{token}");
+        }
+    }
+
+    #[test]
+    fn pane_border_identity_fallback_keeps_explicit_reset() {
+        let (mut app, [_, top, bottom]) = identity_test_app();
+        set_tokens(title_terminal(&mut app, top), &[("role", "build")]);
+        app.palette.overlay0 = Color::Reset;
+        app.pane_border_identity_token = Some(role_identity_token());
+        let area = IDENTITY_AREA;
+        let buffer = render_title_tab(&app, area);
+        let shared_y = title_pane_rect(&app, area, bottom).y;
+        let right_x = area.width - 1;
+
+        assert_eq!(fg_at(&buffer, right_x, 2), BUILD_FG);
+        assert_eq!(fg_at(&buffer, right_x, shared_y), Color::Reset);
+        assert_eq!(fg_at(&buffer, right_x, shared_y + 2), Color::Reset);
+    }
+
+    #[test]
+    fn pane_border_identity_single_and_zoomed_panes_stay_focused() {
+        let (mut app, panes) = title_test_app(false);
+        set_tokens(title_terminal(&mut app, panes[0]), &[("role", "build")]);
+        app.pane_borders = PaneBordersConfig::Always;
+        app.pane_border_identity_token = Some(role_identity_token());
+        let area = Rect::new(0, 0, 30, 5);
+
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(buffer[(0, 0)].symbol(), "┌");
+        for (x, y) in [(0, 2), (29, 2), (10, 4), (29, 4)] {
+            assert_eq!(fg_at(&buffer, x, y), app.palette.accent, "({x}, {y})");
+        }
+
+        let (mut app, panes) = title_test_app(true);
+        for pane in &panes {
+            set_tokens(title_terminal(&mut app, *pane), &[("role", "build")]);
+        }
+        app.pane_border_identity_token = Some(role_identity_token());
+        app.workspaces[0].zoomed = true;
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(buffer[(0, 0)].symbol(), "┌");
+        for (x, y) in [(0, 2), (29, 2), (10, 4)] {
+            assert_eq!(fg_at(&buffer, x, y), app.palette.accent, "({x}, {y})");
+        }
     }
 }

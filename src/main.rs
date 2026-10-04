@@ -358,6 +358,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Let a nonempty manual pane label win over reported titles and title tokens.
 # pane_manual_label_first = false
 
+# Color unfocused pane frame lines from one token's fg, written like one entry of a
+# ui.sidebar.agents.rows row. Missing tokens or tokens without fg keep the default color.
+# pane_border_identity_token = { token = "$role", fg = "#89b4fa" }
+
 # Hide the tab row when a workspace has exactly one tab.
 # New tabs can still be created with the configured keybinding.
 # hide_tab_bar_when_single_tab = false
