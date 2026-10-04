@@ -987,6 +987,10 @@ pub struct UiConfig {
     pub pane_border_style_active: Option<toml::Value>,
     /// Line style of unfocused pane frames; falls back to `pane_border_style`. Default: unset.
     pub pane_border_style_inactive: Option<toml::Value>,
+    /// Blank cells between neighbouring split panes, 0..=65535. When set it overrides
+    /// pane_gaps: 0 shares dividers, N leaves N empty cells between pane frames.
+    /// Kept raw so a malformed value disables only this override. Default: unset.
+    pub pane_gap_cells: Option<toml::Value>,
     /// Show agent labels in split pane borders when no manual pane label is set. Default: false.
     pub show_agent_labels_on_pane_borders: bool,
     /// Hide the tab row when the workspace has one tab. Default: false.
@@ -1227,6 +1231,7 @@ impl Default for UiConfig {
             pane_border_style: None,
             pane_border_style_active: None,
             pane_border_style_inactive: None,
+            pane_gap_cells: None,
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
@@ -1298,6 +1303,21 @@ impl UiConfig {
                 })
         })
         .collect()
+    }
+
+    /// The `pane_gap_cells` override, or `None` when it is unset or malformed.
+    pub fn pane_gap_cells(&self) -> Option<u16> {
+        self.pane_gap_cells
+            .as_ref()?
+            .as_integer()
+            .and_then(|cells| u16::try_from(cells).ok())
+    }
+
+    pub(crate) fn invalid_pane_gap_cells_diagnostic(&self) -> Option<String> {
+        let value = self.pane_gap_cells.as_ref()?;
+        self.pane_gap_cells().is_none().then(|| {
+            format!("ui.pane_gap_cells must be an integer from 0 to 65535 (got {value}); using pane_gaps")
+        })
     }
 }
 
@@ -1740,6 +1760,54 @@ status_indicators = "symbols"
                 );
                 assert!(!diagnostics[0].contains('\n'));
             }
+        }
+    }
+
+    #[test]
+    fn pane_gap_cells_parses_and_defaults_to_unset() {
+        let default_config = Config::default();
+        assert_eq!(default_config.ui.pane_gap_cells(), None);
+        assert_eq!(default_config.ui.invalid_pane_gap_cells_diagnostic(), None);
+
+        for (raw, expected) in [("0", 0), ("3", 3), ("65535", u16::MAX)] {
+            let config: Config = toml::from_str(&format!(
+                "[ui]\npane_gaps = false\npane_gap_cells = {raw}\n"
+            ))
+            .unwrap();
+            assert_eq!(config.ui.pane_gap_cells(), Some(expected));
+            assert!(
+                !config.ui.pane_gaps,
+                "the legacy key still parses beside it"
+            );
+            assert!(config.collect_diagnostics().is_empty());
+        }
+    }
+
+    #[test]
+    fn malformed_pane_gap_cells_reports_field_diagnostic_and_keeps_ui() {
+        for raw in [
+            "-1",
+            "65536",
+            "1.5",
+            "\"2\"",
+            "true",
+            "[1]",
+            "{ cells = 1 }",
+        ] {
+            let config: Config = toml::from_str(&format!(
+                "[ui]\npane_gap_cells = {raw}\npane_gaps = false\npane_scrollbars = false\n"
+            ))
+            .unwrap_or_else(|err| panic!("{raw} must not reject [ui]: {err}"));
+            assert_eq!(config.ui.pane_gap_cells(), None, "{raw}");
+            assert!(!config.ui.pane_gaps, "{raw}: other [ui] keys still apply");
+            assert!(!config.ui.pane_scrollbars, "{raw}");
+            let diagnostics = config.collect_diagnostics();
+            assert_eq!(diagnostics.len(), 1, "{raw}: {diagnostics:?}");
+            assert!(
+                diagnostics[0].starts_with("ui.pane_gap_cells must be an integer from 0 to 65535")
+                    && diagnostics[0].ends_with("; using pane_gaps"),
+                "{raw}: {diagnostics:?}"
+            );
         }
     }
 
