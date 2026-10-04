@@ -105,6 +105,8 @@ pub struct CustomThemeColors {
     pub active_tab_bg: Option<String>,
     pub pane_border_active: Option<String>,
     pub pane_border_inactive: Option<String>,
+    pub popup_bg: Option<String>,
+    pub popup_border: Option<String>,
     pub panel_bg: Option<String>,
     pub sidebar_bg: Option<String>,
     pub active_row_bg: Option<String>,
@@ -138,6 +140,8 @@ pub struct ModeThemeColors {
     pub active_tab_bg: Option<String>,
     pub pane_border_active: Option<String>,
     pub pane_border_inactive: Option<String>,
+    pub popup_bg: Option<String>,
+    pub popup_border: Option<String>,
     pub panel_bg: Option<String>,
     pub sidebar_bg: Option<String>,
     pub active_row_bg: Option<String>,
@@ -343,6 +347,31 @@ pane_border_inactive = "transparent"
         let dark = custom.dark.unwrap();
         assert!(dark.pane_border_active.is_none());
         assert_eq!(dark.pane_border_inactive.as_deref(), Some("transparent"));
+    }
+
+    #[test]
+    fn popup_color_fields_parse_in_common_and_modes() {
+        let config: Config = toml::from_str(
+            r##"
+[theme.custom]
+popup_bg = "#123456"
+popup_border = "reset"
+[theme.custom.light]
+popup_bg = "blue"
+[theme.custom.dark]
+popup_border = "transparent"
+"##,
+        )
+        .unwrap();
+        let custom = config.theme.custom.unwrap();
+        assert_eq!(custom.popup_bg.as_deref(), Some("#123456"));
+        assert_eq!(custom.popup_border.as_deref(), Some("reset"));
+        let light = custom.light.unwrap();
+        assert_eq!(light.popup_bg.as_deref(), Some("blue"));
+        assert!(light.popup_border.is_none());
+        let dark = custom.dark.unwrap();
+        assert!(dark.popup_bg.is_none());
+        assert_eq!(dark.popup_border.as_deref(), Some("transparent"));
     }
 
     #[test]
