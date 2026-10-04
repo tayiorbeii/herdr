@@ -50,6 +50,8 @@ pub struct Palette {
     pub panel_bg: Color,
     /// Optional desktop sidebar background. Reset preserves the terminal background.
     pub sidebar_bg: Color,
+    /// Optional default-background tint for unfocused panes. None keeps the baseline.
+    pub pane_inactive_bg: Option<Color>,
     /// Background for the active workspace and focused agent rows.
     pub active_row_bg: Color,
     /// Background for the Navigate-mode cursor row in the sidebar.
@@ -97,6 +99,7 @@ impl Palette {
             accent: Color::Rgb(137, 180, 250), // blue
             panel_bg: Color::Rgb(24, 24, 37),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(30, 30, 46),
             selection_bg: Color::Rgb(49, 50, 68),
             surface0: Color::Rgb(49, 50, 68),
@@ -128,6 +131,7 @@ impl Palette {
             accent: Color::Rgb(30, 102, 245),
             panel_bg: Color::Rgb(239, 241, 245),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(230, 233, 239),
             selection_bg: Color::Rgb(189, 208, 245),
             surface0: Color::Rgb(204, 208, 218),
@@ -159,6 +163,7 @@ impl Palette {
             accent: Color::Blue,
             panel_bg: Color::Reset,
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::DarkGray,
             selection_bg: Color::Reset,
             surface0: Color::Reset,
@@ -190,6 +195,7 @@ impl Palette {
             accent: Color::Rgb(122, 162, 247), // blue
             panel_bg: Color::Rgb(26, 27, 38),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(35, 38, 54),
             selection_bg: Color::Rgb(45, 54, 80),
             surface0: Color::Rgb(36, 40, 59),
@@ -221,6 +227,7 @@ impl Palette {
             accent: Color::Rgb(46, 125, 233),
             panel_bg: Color::Rgb(225, 226, 231),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(210, 211, 218),
             selection_bg: Color::Rgb(182, 202, 231),
             surface0: Color::Rgb(196, 200, 218),
@@ -252,6 +259,7 @@ impl Palette {
             accent: Color::Rgb(189, 147, 249), // purple
             panel_bg: Color::Rgb(40, 42, 54),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(55, 60, 82),
             selection_bg: Color::Rgb(70, 63, 93),
             surface0: Color::Rgb(68, 71, 90),
@@ -283,6 +291,7 @@ impl Palette {
             accent: Color::Rgb(136, 192, 208), // frost
             panel_bg: Color::Rgb(46, 52, 64),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(67, 76, 94),
             selection_bg: Color::Rgb(64, 80, 93),
             surface0: Color::Rgb(59, 66, 82),
@@ -314,6 +323,7 @@ impl Palette {
             accent: Color::Rgb(215, 153, 33), // yellow
             panel_bg: Color::Rgb(40, 40, 40),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(50, 49, 48),
             selection_bg: Color::Rgb(75, 63, 39),
             surface0: Color::Rgb(60, 56, 54),
@@ -345,6 +355,7 @@ impl Palette {
             accent: Color::Rgb(7, 102, 120),
             panel_bg: Color::Rgb(251, 241, 199),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(242, 229, 188),
             selection_bg: Color::Rgb(235, 219, 178),
             surface0: Color::Rgb(235, 219, 178),
@@ -376,6 +387,7 @@ impl Palette {
             accent: Color::Rgb(97, 175, 239), // blue
             panel_bg: Color::Rgb(40, 44, 52),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(49, 54, 64),
             selection_bg: Color::Rgb(51, 70, 89),
             surface0: Color::Rgb(44, 49, 58),
@@ -407,6 +419,7 @@ impl Palette {
             accent: Color::Rgb(64, 120, 242),
             panel_bg: Color::Rgb(250, 250, 250),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(216, 219, 226),
             selection_bg: Color::Rgb(205, 219, 248),
             surface0: Color::Rgb(240, 240, 241),
@@ -438,6 +451,7 @@ impl Palette {
             accent: Color::Rgb(38, 139, 210), // blue
             panel_bg: Color::Rgb(0, 43, 54),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(22, 75, 87),
             selection_bg: Color::Rgb(8, 62, 85),
             surface0: Color::Rgb(7, 54, 66),
@@ -469,6 +483,7 @@ impl Palette {
             accent: Color::Rgb(38, 139, 210),
             panel_bg: Color::Rgb(253, 246, 227),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(238, 232, 213),
             selection_bg: Color::Rgb(201, 220, 223),
             surface0: Color::Rgb(238, 232, 213),
@@ -500,6 +515,7 @@ impl Palette {
             accent: Color::Rgb(126, 156, 216), // blue
             panel_bg: Color::Rgb(31, 31, 40),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(54, 54, 70),
             selection_bg: Color::Rgb(50, 56, 75),
             surface0: Color::Rgb(42, 42, 55),
@@ -531,6 +547,7 @@ impl Palette {
             accent: Color::Rgb(77, 105, 155),
             panel_bg: Color::Rgb(242, 236, 188),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(213, 206, 163),
             selection_bg: Color::Rgb(220, 213, 172),
             surface0: Color::Rgb(220, 213, 172),
@@ -562,6 +579,7 @@ impl Palette {
             accent: Color::Rgb(196, 167, 231), // iris
             panel_bg: Color::Rgb(25, 23, 36),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(38, 35, 58),
             selection_bg: Color::Rgb(59, 52, 75),
             surface0: Color::Rgb(31, 29, 46),
@@ -593,6 +611,7 @@ impl Palette {
             accent: Color::Rgb(144, 122, 169),
             panel_bg: Color::Rgb(250, 244, 237),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(227, 217, 207),
             selection_bg: Color::Rgb(242, 233, 225),
             surface0: Color::Rgb(242, 233, 225),
@@ -624,6 +643,7 @@ impl Palette {
             accent: Color::Rgb(255, 199, 153),
             panel_bg: Color::Rgb(26, 26, 26),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(16, 16, 16),
             selection_bg: Color::Rgb(35, 35, 35),
             surface0: Color::Rgb(35, 35, 35),
@@ -697,6 +717,9 @@ impl Palette {
         }
         if let Some(c) = &custom.sidebar_bg {
             self.sidebar_bg = parse_color(c);
+        }
+        if let Some(c) = &custom.pane_inactive_bg {
+            self.pane_inactive_bg = Some(parse_color(c));
         }
         if let Some(c) = &custom.active_row_bg {
             self.active_row_bg = parse_color(c);
@@ -777,6 +800,9 @@ impl Palette {
         }
         if let Some(c) = &custom.sidebar_bg {
             self.sidebar_bg = parse_color(c);
+        }
+        if let Some(c) = &custom.pane_inactive_bg {
+            self.pane_inactive_bg = Some(parse_color(c));
         }
         if let Some(c) = &custom.active_row_bg {
             self.active_row_bg = parse_color(c);
@@ -1767,6 +1793,52 @@ mod tests {
                 "built-in theme changed the sidebar background: {name}"
             );
         }
+    }
+
+    #[test]
+    fn built_in_themes_leave_pane_inactive_bg_unset() {
+        assert_eq!(crate::config::THEME_NAMES.len(), 18);
+        for name in crate::config::THEME_NAMES {
+            let palette = Palette::from_name(name).unwrap();
+            assert_eq!(palette.pane_inactive_bg, None, "theme: {name}");
+        }
+    }
+
+    #[test]
+    fn pane_inactive_bg_mode_overrides_inherit_common_and_preserve_reset() {
+        let common = crate::config::CustomThemeColors {
+            pane_inactive_bg: Some("#101820".into()),
+            ..Default::default()
+        };
+        let palette = Palette::catppuccin().with_overrides(&common);
+        assert_eq!(palette.pane_inactive_bg, Some(Color::Rgb(0x10, 0x18, 0x20)));
+        let inherited = palette
+            .clone()
+            .with_mode_overrides(&crate::config::ModeThemeColors::default());
+        assert_eq!(
+            inherited.pane_inactive_bg,
+            Some(Color::Rgb(0x10, 0x18, 0x20))
+        );
+        for alias in ["reset", "default", "none", "transparent"] {
+            let mode = crate::config::ModeThemeColors {
+                pane_inactive_bg: Some(alias.into()),
+                ..Default::default()
+            };
+            let resolved = palette.clone().with_mode_overrides(&mode);
+            assert_eq!(
+                resolved.pane_inactive_bg,
+                Some(Color::Reset),
+                "alias: {alias}"
+            );
+        }
+        let invalid = crate::config::ModeThemeColors {
+            pane_inactive_bg: Some("not-a-color".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            palette.with_mode_overrides(&invalid).pane_inactive_bg,
+            Some(Color::Cyan)
+        );
     }
 
     #[test]
