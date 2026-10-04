@@ -63,6 +63,8 @@ herdr
 
 可在 `[theme.custom]` 中使用可选的 `pane_border_active` 和 `pane_border_inactive` 自定义窗格边框与标题的聚焦颜色（启用 `auto_switch` 时也可在 `light`/`dark` 子表中设置）。省略时继续跟随 `accent` 和 `overlay0`；重置别名明确使用终端默认色。详情见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
 
+可在 `[theme.custom]` 中使用可选的 `popup_bg` 和 `popup_border` 自定义终端弹窗（启用 `auto_switch` 时也可在 `light`/`dark` 子表中设置）。省略颜色会保留现有的弹窗外观；弹窗内程序显式设置的背景色保持不变。详情见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
+
 ## 致谢
 
 <a href="https://terminaltrove.com/"><img src="assets/sponsors/terminal-trove.png" alt="Terminal Trove" width="200" /></a>

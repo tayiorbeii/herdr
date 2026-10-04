@@ -590,6 +590,82 @@ active_tab_fg = "default"
     }
 
     #[test]
+    fn popup_colors_survive_appearance_changes_and_reload_removal() {
+        use crate::terminal_theme::HostAppearance;
+        use ratatui::style::Color;
+
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "herdr-popup-colors-reload-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let original = std::env::var_os(crate::config::CONFIG_PATH_ENV_VAR);
+        std::fs::write(
+            &path,
+            r#"
+[theme]
+name = "terminal"
+auto_switch = true
+[theme.custom]
+popup_bg = "blue"
+[theme.custom.light]
+popup_border = "green"
+[theme.custom.dark]
+popup_bg = "reset"
+"#,
+        )
+        .unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let loaded = crate::config::load_live_config().unwrap();
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&loaded.config));
+        assert_eq!(state.config.palette.popup_bg, Some(Color::Reset));
+        assert_eq!(state.config.palette.popup_border, None);
+        state.handle_raw_events(vec![
+            crate::raw_input::RawInputEvent::HostColorSchemeChanged(HostAppearance::Light),
+        ]);
+        assert_eq!(state.config.palette.popup_bg, Some(Color::Blue));
+        assert_eq!(state.config.palette.popup_border, Some(Color::Green));
+
+        std::fs::write(
+            &path,
+            r#"
+[theme]
+name = "terminal"
+auto_switch = true
+[theme.custom]
+popup_border = "yellow"
+[theme.custom.light]
+popup_bg = "default"
+"#,
+        )
+        .unwrap();
+        state.reload_client_config();
+        assert_eq!(state.config.palette.popup_bg, Some(Color::Reset));
+        assert_eq!(state.config.palette.popup_border, Some(Color::Yellow));
+        state.handle_raw_events(vec![
+            crate::raw_input::RawInputEvent::HostColorSchemeChanged(HostAppearance::Dark),
+        ]);
+        assert_eq!(state.config.palette.popup_bg, None);
+        assert_eq!(state.config.palette.popup_border, Some(Color::Yellow));
+
+        std::fs::write(&path, "[theme]\nname = 'terminal'\nauto_switch = true\n").unwrap();
+        state.reload_client_config();
+        assert_eq!(state.config.palette.popup_bg, None);
+        assert_eq!(state.config.palette.popup_border, None);
+        assert!(state.local_config_diagnostic.is_none());
+        if let Some(original) = original {
+            std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, original);
+        } else {
+            std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn live_reload_applies_client_owned_sections() {
         let mut shell = ClientShellConfig::from_config(&Config::default());
         let mut next = Config::default();

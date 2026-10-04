@@ -258,5 +258,6 @@ mod keybindings_settings;
 mod link_hover;
 mod mobile;
 mod mouse_selection;
+mod popup_colors;
 mod popup_focus_projection;
 mod startup_overlays;
