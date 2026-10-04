@@ -451,6 +451,111 @@ mod tests {
     use super::*;
 
     #[test]
+    fn active_tab_colors_do_not_change_tab_bar_visibility() {
+        let mut config = Config::default();
+        config.ui.hide_tab_bar_when_single_tab = true;
+        config.ui.mobile_width_threshold = 40;
+        let baseline = ClientShellConfig::from_config(&config);
+        config.theme.custom = Some(crate::config::CustomThemeColors {
+            active_tab_fg: Some("red".into()),
+            active_tab_bg: Some("blue".into()),
+            ..Default::default()
+        });
+        let overridden = ClientShellConfig::from_config(&config);
+        for (cols, rows, tabs) in [(120, 20, 1), (120, 20, 2), (30, 20, 2), (120, 1, 2)] {
+            let before = baseline.layout(cols, rows, false, tabs, 26);
+            let after = overridden.layout(cols, rows, false, tabs, 26);
+            assert_eq!(before.tab_bar, after.tab_bar);
+            assert_eq!(before.pane_surface, after.pane_surface);
+            if tabs == 1 || cols == 30 || rows == 1 {
+                assert_eq!(after.tab_bar.height, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn active_tab_colors_survive_appearance_changes_and_reload_removal() {
+        use crate::terminal_theme::HostAppearance;
+        use ratatui::style::Color;
+
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "herdr-active-tab-reload-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let original = std::env::var_os(crate::config::CONFIG_PATH_ENV_VAR);
+        std::fs::write(
+            &path,
+            r#"
+[theme]
+name = "terminal"
+auto_switch = true
+[theme.custom]
+active_tab_fg = "blue"
+[theme.custom.light]
+active_tab_bg = "green"
+[theme.custom.dark]
+active_tab_fg = "reset"
+"#,
+        )
+        .unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let loaded = crate::config::load_live_config().unwrap();
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&loaded.config));
+        assert_eq!(state.config.palette.active_tab_fg, Some(Color::Reset));
+        assert_eq!(state.config.palette.active_tab_bg, None);
+        state.handle_raw_events(vec![
+            crate::raw_input::RawInputEvent::HostColorSchemeChanged(HostAppearance::Light),
+        ]);
+        assert_eq!(state.config.palette.active_tab_fg, Some(Color::Blue));
+        assert_eq!(state.config.palette.active_tab_bg, Some(Color::Green));
+
+        std::fs::write(
+            &path,
+            r#"
+[theme]
+name = "terminal"
+auto_switch = true
+[theme.custom]
+active_tab_bg = "yellow"
+[theme.custom.light]
+active_tab_fg = "default"
+"#,
+        )
+        .unwrap();
+        state.reload_client_config();
+        assert_eq!(state.config.palette.active_tab_fg, Some(Color::Reset));
+        assert_eq!(state.config.palette.active_tab_bg, Some(Color::Yellow));
+        assert_eq!(state.host_appearance, Some(HostAppearance::Light));
+        state.handle_raw_events(vec![
+            crate::raw_input::RawInputEvent::HostColorSchemeChanged(HostAppearance::Dark),
+        ]);
+        assert_eq!(state.config.palette.active_tab_fg, None);
+        assert_eq!(state.config.palette.active_tab_bg, Some(Color::Yellow));
+
+        std::fs::write(
+            &path,
+            "[ui]\naccent = 'red'\n[theme]\nname = 'terminal'\nauto_switch = true\n",
+        )
+        .unwrap();
+        state.reload_client_config();
+        assert_eq!(state.config.palette.active_tab_fg, None);
+        assert_eq!(state.config.palette.active_tab_bg, None);
+        assert_eq!(state.config.palette.accent, Color::Red);
+        assert!(state.local_config_diagnostic.is_none());
+        if let Some(original) = original {
+            std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, original);
+        } else {
+            std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
     fn live_reload_applies_client_owned_sections() {
         let mut shell = ClientShellConfig::from_config(&Config::default());
         let mut next = Config::default();

@@ -101,6 +101,8 @@ impl ThemeConfig {
 #[serde(default)]
 pub struct CustomThemeColors {
     pub accent: Option<String>,
+    pub active_tab_fg: Option<String>,
+    pub active_tab_bg: Option<String>,
     pub panel_bg: Option<String>,
     pub sidebar_bg: Option<String>,
     pub active_row_bg: Option<String>,
@@ -130,6 +132,8 @@ pub struct CustomThemeColors {
 #[serde(default)]
 pub struct ModeThemeColors {
     pub accent: Option<String>,
+    pub active_tab_fg: Option<String>,
+    pub active_tab_bg: Option<String>,
     pub panel_bg: Option<String>,
     pub sidebar_bg: Option<String>,
     pub active_row_bg: Option<String>,
@@ -162,7 +166,7 @@ pub fn parse_color(s: &str) -> ratatui::style::Color {
     }
 
     if let Some(hex) = s.strip_prefix('#') {
-        if hex.len() == 6 {
+        if hex.len() == 6 && hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             if let (Ok(r), Ok(g), Ok(b)) = (
                 u8::from_str_radix(&hex[0..2], 16),
                 u8::from_str_radix(&hex[2..4], 16),
@@ -268,6 +272,48 @@ light_name = "lattee"
         for value in ["reset", "default", "none", "transparent"] {
             assert_eq!(parse_color(value), Color::Reset, "value: {value}");
         }
+    }
+
+    #[test]
+    fn parse_color_rejects_non_ascii_hex_without_panicking() {
+        use ratatui::style::Color;
+
+        for value in ["#💩ab", "#a💩b", "#ab💩", "#éabcd", "#gg0000"] {
+            assert_eq!(parse_color(value), Color::Cyan, "value: {value}");
+        }
+        for (value, expected) in [
+            ("#AbC", Color::Rgb(170, 187, 204)),
+            ("#01AbEF", Color::Rgb(1, 171, 239)),
+            ("blue", Color::Blue),
+            ("rgb(1, 2, 3)", Color::Rgb(1, 2, 3)),
+        ] {
+            assert_eq!(parse_color(value), expected, "value: {value}");
+        }
+    }
+
+    #[test]
+    fn active_tab_color_fields_parse_in_common_and_modes() {
+        let config: Config = toml::from_str(
+            r##"
+[theme.custom]
+active_tab_fg = "#123456"
+active_tab_bg = "reset"
+[theme.custom.light]
+active_tab_fg = "blue"
+[theme.custom.dark]
+active_tab_bg = "transparent"
+"##,
+        )
+        .unwrap();
+        let custom = config.theme.custom.unwrap();
+        assert_eq!(custom.active_tab_fg.as_deref(), Some("#123456"));
+        assert_eq!(custom.active_tab_bg.as_deref(), Some("reset"));
+        let light = custom.light.unwrap();
+        assert_eq!(light.active_tab_fg.as_deref(), Some("blue"));
+        assert!(light.active_tab_bg.is_none());
+        let dark = custom.dark.unwrap();
+        assert!(dark.active_tab_fg.is_none());
+        assert_eq!(dark.active_tab_bg.as_deref(), Some("transparent"));
     }
 
     #[test]

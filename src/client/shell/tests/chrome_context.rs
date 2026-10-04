@@ -1,5 +1,134 @@
 use super::*;
 
+fn render_tab_color_test(
+    snapshot: &ClientShellSnapshot,
+    config: &ClientShellConfig,
+    width: u16,
+    scroll: usize,
+) -> (Buffer, ShellHitMap, usize) {
+    let area = Rect::new(0, 0, width, 1);
+    let mut buffer = Buffer::empty(area);
+    let mut hits = ShellHitMap::default();
+    let mut scroll = scroll;
+    let mut reveal = false;
+    render::render_tab_bar(
+        &mut buffer,
+        area,
+        snapshot,
+        config,
+        &mut scroll,
+        &mut reveal,
+        Some(1),
+        &mut hits,
+    );
+    (buffer, hits, scroll)
+}
+
+#[test]
+fn active_tab_colors_resolve_independently_and_keep_label_emphasis() {
+    use ratatui::style::Color;
+
+    let mut projected = snapshot();
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    for name in crate::config::THEME_NAMES {
+        for custom_label in [false, true] {
+            projected.tabs[0].custom_label = custom_label;
+            for (fg, bg) in [
+                (None, None),
+                (Some(Color::Red), None),
+                (None, Some(Color::Green)),
+                (Some(Color::Red), Some(Color::Green)),
+                (Some(Color::Reset), None),
+                (None, Some(Color::Reset)),
+                (Some(Color::Reset), Some(Color::Reset)),
+            ] {
+                config.palette = Palette::from_name(name).unwrap();
+                config.palette.active_tab_fg = fg;
+                config.palette.active_tab_bg = bg;
+                // Fallbacks follow the final palette, not the built-in values.
+                config.palette.accent = Color::Yellow;
+                config.palette.surface_dim = Color::Magenta;
+                let expected_fg = fg.unwrap_or_else(|| {
+                    if config.palette.panel_bg == Color::Reset {
+                        config.palette.surface_dim
+                    } else {
+                        config.palette.panel_bg
+                    }
+                });
+                let (buffer, hits, _) = render_tab_color_test(&projected, &config, 120, 0);
+                let rect = hits.tabs[0].0;
+                for x in rect.x..rect.right() {
+                    let cell = &buffer[(x, rect.y)];
+                    assert_eq!(cell.fg, expected_fg, "theme: {name}");
+                    assert_eq!(cell.bg, bg.unwrap_or(Color::Yellow), "theme: {name}");
+                    assert_eq!(cell.modifier.contains(Modifier::BOLD), custom_label);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn active_tab_colors_leave_inactive_status_and_hit_geometry_unchanged() {
+    use ratatui::style::Color;
+
+    let mut projected = snapshot();
+    projected.tabs.extend((2..=8).map(|number| ClientShellTab {
+        tab_id: format!("tab_{number}"),
+        workspace_id: "ws_1".into(),
+        number,
+        label: format!("tab-{number}"),
+        custom_label: number % 2 == 0,
+        zoomed: false,
+        focused: false,
+        agent_status: AgentStatus::Working,
+    }));
+    projected.tab_bar_right = vec![
+        crate::protocol::ClientShellTabStatusSegment {
+            text: "ZOOM".into(),
+            accent: true,
+        },
+        crate::protocol::ClientShellTabStatusSegment {
+            text: "host".into(),
+            accent: false,
+        },
+    ];
+    let baseline = ClientShellConfig::from_config(&Config::default());
+    let mut overridden = ClientShellConfig::from_config(&Config::default());
+    overridden.palette.active_tab_fg = Some(Color::Reset);
+    overridden.palette.active_tab_bg = Some(Color::Red);
+    for width in [120, 55, 22] {
+        for scroll in [0, 2] {
+            let (before, before_hits, before_scroll) =
+                render_tab_color_test(&projected, &baseline, width, scroll);
+            let (after, after_hits, after_scroll) =
+                render_tab_color_test(&projected, &overridden, width, scroll);
+            assert_eq!(before_hits.tabs, after_hits.tabs);
+            assert_eq!(before_hits.new_tab, after_hits.new_tab);
+            assert_eq!(before_hits.tab_scroll_left, after_hits.tab_scroll_left);
+            assert_eq!(before_hits.tab_scroll_right, after_hits.tab_scroll_right);
+            assert_eq!(before_scroll, after_scroll);
+            let active_rect = before_hits
+                .tabs
+                .iter()
+                .find(|(_, id)| id == "tab_1")
+                .map(|(rect, _)| *rect);
+            for x in 0..width {
+                let mut expected = before[(x, 0)].clone();
+                if active_rect.is_some_and(|rect| x >= rect.x && x < rect.right()) {
+                    expected.fg = Color::Reset;
+                    expected.bg = Color::Red;
+                }
+                assert_eq!(
+                    after[(x, 0)],
+                    expected,
+                    "width: {width}, scroll: {scroll}, x: {x}"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn tab_overflow_controls_scroll_the_client_owned_tab_bar() {
     let mut snapshot = snapshot();
