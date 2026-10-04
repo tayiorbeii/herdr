@@ -65,6 +65,19 @@ pub(crate) fn expanded_sidebar_sections(area: Rect, split_ratio: f32) -> (Rect, 
     )
 }
 
+/// Insets one sidebar section's content by `padding` cells per side, clamped per axis so an
+/// axis with any interior keeps at least one usable cell.
+pub(crate) fn inset_sidebar_section(section: Rect, padding: u16) -> Rect {
+    let horizontal = padding.min(section.width.saturating_sub(1) / 2);
+    let vertical = padding.min(section.height.saturating_sub(1) / 2);
+    Rect::new(
+        section.x + horizontal,
+        section.y + vertical,
+        section.width - 2 * horizontal,
+        section.height - 2 * vertical,
+    )
+}
+
 pub(crate) fn sidebar_section_divider_rect(area: Rect, split_ratio: f32) -> Rect {
     let content = Rect::new(area.x, area.y, area.width.saturating_sub(1), area.height);
     if content.width == 0 || content.height < 6 {
@@ -293,4 +306,34 @@ fn apply_token_style(mut style: Style, patch: crate::config::SidebarTokenStyle) 
         };
     }
     style
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sidebar_section_inset_clamps_per_axis() {
+        let section = Rect::new(2, 3, 20, 9);
+        assert_eq!(inset_sidebar_section(section, 0), section);
+        assert_eq!(inset_sidebar_section(section, 1), Rect::new(3, 4, 18, 7));
+        assert_eq!(inset_sidebar_section(section, 4), Rect::new(6, 7, 12, 1));
+        assert_eq!(inset_sidebar_section(section, 9), Rect::new(11, 7, 2, 1));
+        assert_eq!(
+            inset_sidebar_section(section, u16::MAX),
+            Rect::new(11, 7, 2, 1)
+        );
+        assert_eq!(
+            inset_sidebar_section(Rect::new(0, 0, 2, 2), 3),
+            Rect::new(0, 0, 2, 2)
+        );
+        assert_eq!(
+            inset_sidebar_section(Rect::new(0, 0, 3, 1), 3),
+            Rect::new(1, 0, 1, 1)
+        );
+        assert_eq!(
+            inset_sidebar_section(Rect::new(4, 5, 0, 0), 3),
+            Rect::new(4, 5, 0, 0)
+        );
+    }
 }
