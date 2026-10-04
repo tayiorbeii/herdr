@@ -786,12 +786,17 @@ mod tests {
         );
     }
 
-    fn rounded_corner_changes(
+    const ROUNDED_COLS: u16 = 100;
+    const ROUNDED_ROWS: u16 = 30;
+
+    /// Composes the same workspace through the server and client with
+    /// `rounded_borders` off, then on.
+    fn rounded_frame_pair(
         build: impl Fn() -> crate::workspace::Workspace,
         configure: impl Fn(&mut crate::config::Config),
-    ) -> Vec<((u16, u16), String, String)> {
-        const COLS: u16 = 100;
-        const ROWS: u16 = 30;
+    ) -> (crate::protocol::FrameData, crate::protocol::FrameData) {
+        const COLS: u16 = ROUNDED_COLS;
+        const ROWS: u16 = ROUNDED_ROWS;
         let mut frames = Vec::new();
         for rounded in [false, true] {
             let mut config = crate::config::Config::default();
@@ -843,7 +848,18 @@ mod tests {
             });
             frames.push(client.compose(COLS, ROWS).expect("composed frame").frame);
         }
-        let (square, rounded) = (&frames[0], &frames[1]);
+        let rounded = frames.pop().expect("rounded frame");
+        let square = frames.pop().expect("square frame");
+        (square, rounded)
+    }
+
+    fn rounded_corner_changes(
+        build: impl Fn() -> crate::workspace::Workspace,
+        configure: impl Fn(&mut crate::config::Config),
+    ) -> Vec<((u16, u16), String, String)> {
+        const COLS: u16 = ROUNDED_COLS;
+        let (square, rounded) = rounded_frame_pair(build, configure);
+        let (square, rounded) = (&square, &rounded);
         let symbols: Vec<&str> = square
             .cells
             .iter()
@@ -941,6 +957,73 @@ mod tests {
             "╭╭╮╮╯╯╰╰",
             "separated panes round each frame"
         );
+    }
+
+    /// GW1/A1 x B1: rounding is a client pass over light corners only, so the
+    /// heavy (GW1, or A1 focus) and double (GW1 + A1 focus) corners stay square.
+    #[tokio::test(flavor = "current_thread")]
+    async fn rounded_borders_keep_heavy_and_double_pane_corners_square() {
+        fn glyphs(frame: &FrameData, set: &str) -> String {
+            let mut found: Vec<&str> = frame
+                .cells
+                .iter()
+                .map(|cell| cell.symbol.as_str())
+                .filter(|symbol| !symbol.is_empty() && set.contains(symbol))
+                .collect();
+            found.sort_unstable();
+            found.concat()
+        }
+        const ARCS: &str = "╭╮╰╯";
+        const LIGHT: &str = "┌┐└┘";
+        const HEAVY: &str = "┏┓┗┛";
+        const DOUBLE: &str = "╔╗╚╝";
+        let build = || rounded_test_workspace(2, false);
+        let sorted = |corners: &str| {
+            let mut chars: Vec<char> = corners.chars().collect();
+            chars.sort_unstable();
+            chars.into_iter().collect::<String>()
+        };
+
+        for shared in [false, true] {
+            let configure = |heavy: bool, weight: bool| {
+                move |config: &mut crate::config::Config| {
+                    config.ui.pane_heavy_borders = heavy;
+                    config.ui.pane_focus_weight = weight;
+                    config.ui.pane_gaps = !shared;
+                }
+            };
+
+            // Heavy and focus weight: every corner is heavy or double; none round.
+            assert!(rounded_corner_changes(build, configure(true, true)).is_empty());
+            let (square, rounded) = rounded_frame_pair(build, configure(true, true));
+            assert_eq!(square, rounded, "shared={shared}");
+            assert_eq!(glyphs(&rounded, ARCS), "", "shared={shared}");
+            assert!(!glyphs(&rounded, DOUBLE).is_empty(), "shared={shared}");
+            if !shared {
+                assert_eq!(glyphs(&rounded, DOUBLE), sorted(DOUBLE));
+                assert_eq!(glyphs(&rounded, HEAVY), sorted(HEAVY));
+            }
+
+            // Heavy only: all frames heavy, nothing rounds.
+            assert!(rounded_corner_changes(build, configure(true, false)).is_empty());
+            let (_, rounded) = rounded_frame_pair(build, configure(true, false));
+            assert_eq!(glyphs(&rounded, ARCS), "", "shared={shared}");
+            assert_eq!(glyphs(&rounded, DOUBLE), "", "shared={shared}");
+
+            // Focus weight only: the focused frame's heavy corners stay square and
+            // only the unfocused light corners round.
+            let changes = rounded_corner_changes(build, configure(false, true));
+            assert!(changes
+                .iter()
+                .all(|(_, before, _)| LIGHT.contains(before.as_str())));
+            let (_, rounded) = rounded_frame_pair(build, configure(false, true));
+            assert!(!glyphs(&rounded, HEAVY).is_empty(), "shared={shared}");
+            if !shared {
+                assert_eq!(changes.len(), 4);
+                assert_eq!(glyphs(&rounded, HEAVY), sorted(HEAVY));
+                assert_eq!(glyphs(&rounded, ARCS), sorted(ARCS));
+            }
+        }
     }
 
     fn focus_weight_app(pane_focus_weight: bool) -> (crate::app::App, [crate::layout::PaneId; 2]) {
