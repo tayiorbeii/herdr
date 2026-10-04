@@ -2577,6 +2577,32 @@ mod tests {
         );
     }
 
+    /// A1/GW1 x S1: focus ownership follows the resolved spacing, not the legacy
+    /// `pane_gaps` flag, so `pane_gap_cells = 0` beside `pane_gaps = true` draws exactly
+    /// the shared-divider glyphs and colors, with every focus-weight and heavy mix.
+    #[test]
+    fn pane_gap_cells_zero_weights_and_colors_like_shared_dividers() {
+        let (mut workspace, panes) = focus_weight_grid();
+        let area = Rect::new(0, 0, 12, 6);
+        for focused in panes {
+            workspace.tabs[0].layout.focus_pane(focused);
+            for (weight, heavy) in [(true, false), (false, true), (true, true)] {
+                let mut legacy = focus_weight_app(PaneBordersConfig::Auto, false, true);
+                legacy.pane_focus_weight = weight;
+                legacy.pane_heavy_borders = heavy;
+                let mut zero = focus_weight_app(PaneBordersConfig::Auto, true, true);
+                zero.pane_gap_cells = Some(0);
+                zero.pane_focus_weight = weight;
+                zero.pane_heavy_borders = heavy;
+                assert_eq!(
+                    render_layout_borders(&zero, &workspace, area),
+                    render_layout_borders(&legacy, &workspace, area),
+                    "weight={weight} heavy={heavy}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn pane_focus_weight_disabled_matches_baseline_buffers() {
         let (mut workspace, panes) = focus_weight_grid();
