@@ -59,6 +59,8 @@ herdr
 
 在 `[ui]` 下设置 `pane_heavy_borders = true`，即可用粗线绘制所有窗格边框；与 `pane_focus_weight = true` 同时使用时，获得焦点的窗格改用双线。参见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
 
+在 `[ui]` 下用 `pane_gap_cells = N` 设置分割窗格之间的空白：`0` 共用分隔线，`N` 在窗格边框之间留出 N 个空白单元格。未设置时保持现有的 `pane_gaps` 行为。参见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
+
 ## 文档
 
 所有文档都在 [herdr.dev/docs](https://herdr.dev/zh-cn/docs/)：[快速开始](https://herdr.dev/zh-cn/docs/quick-start/) · [核心概念](https://herdr.dev/zh-cn/docs/concepts/) · [受支持的智能体](https://herdr.dev/zh-cn/docs/agents/) · [键盘](https://herdr.dev/zh-cn/docs/keyboard/) · [配置](https://herdr.dev/zh-cn/docs/configuration/) · [会话状态](https://herdr.dev/zh-cn/docs/session-state/) · [连接机器](https://herdr.dev/zh-cn/docs/connecting-machines/) · [远程访问](https://herdr.dev/zh-cn/docs/persistence-remote/) · [集成](https://herdr.dev/zh-cn/docs/integrations/) · [为智能体添加 herdr 支持](https://herdr.dev/zh-cn/docs/add-herdr-support/) · [插件](https://herdr.dev/zh-cn/docs/plugins/) · [socket api](https://herdr.dev/zh-cn/docs/socket-api/)

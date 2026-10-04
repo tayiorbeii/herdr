@@ -493,6 +493,7 @@ impl App {
             pane_gaps: config.ui.pane_gaps,
             pane_focus_weight: config.ui.pane_focus_weight,
             pane_heavy_borders: config.ui.pane_heavy_borders,
+            pane_gap_cells: config.ui.pane_gap_cells(),
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: String::new(),
@@ -835,6 +836,7 @@ impl App {
                 diagnostics.extend(crate::config::window_title_diagnostics(
                     &config.ui.window_title,
                 ));
+                diagnostics.extend(config.ui.invalid_pane_gap_cells_diagnostic());
 
                 self.loaded_host_cursor = config.ui.host_cursor;
                 self.state.confirm_close = config.ui.confirm_close;
@@ -844,6 +846,7 @@ impl App {
                 self.state.pane_gaps = config.ui.pane_gaps;
                 self.state.pane_focus_weight = config.ui.pane_focus_weight;
                 self.state.pane_heavy_borders = config.ui.pane_heavy_borders;
+                self.state.pane_gap_cells = config.ui.pane_gap_cells();
                 self.state.show_agent_labels_on_pane_borders =
                     config.ui.show_agent_labels_on_pane_borders;
                 self.configure_tab_bar_status(
@@ -2078,6 +2081,53 @@ pane_border_inactive = "reset"
             crate::config::HostCursorModeConfig::Native
         );
         assert!(app.state.request_client_config_reload);
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_config_applies_and_removes_pane_gap_cells() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-pane-gap-cells");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let mut app = test_app();
+        assert_eq!(app.state.pane_gap_cells, None);
+
+        std::fs::write(&path, "[ui]\npane_gap_cells = 4\n").unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
+        assert_eq!(app.state.pane_spacing(), crate::ui::PaneSpacing::Cells(4));
+
+        std::fs::write(
+            &path,
+            "[ui]\npane_gap_cells = \"wide\"\npane_scrollbars = false\n",
+        )
+        .unwrap();
+        let report = app.reload_config();
+        assert_eq!(app.state.pane_gap_cells, None);
+        assert!(!app.state.pane_scrollbars, "the rest of [ui] still applies");
+        assert_eq!(
+            report.diagnostics,
+            vec![
+                "ui.pane_gap_cells must be an integer from 0 to 65535 (got \"wide\"); using pane_gaps"
+                    .to_string()
+            ]
+        );
+
+        std::fs::write(&path, "[ui]\npane_gap_cells = 0\n").unwrap();
+        app.reload_config();
+        assert_eq!(app.state.pane_spacing(), crate::ui::PaneSpacing::Cells(0));
+
+        std::fs::write(&path, "[ui]\npane_gaps = false\n").unwrap();
+        app.reload_config();
+        assert_eq!(app.state.pane_gap_cells, None);
+        assert_eq!(
+            app.state.pane_spacing(),
+            crate::ui::PaneSpacing::Legacy(false)
+        );
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
