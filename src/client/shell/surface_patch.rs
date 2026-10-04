@@ -93,6 +93,19 @@ fn fast_path_blocker(
     }
 }
 
+fn row_in_inner_rect(
+    row: &crate::protocol::PaneSurfacePatchRow,
+    pane: &crate::protocol::PaneSurfacePane,
+) -> bool {
+    row.x >= pane.inner_rect.x
+        && row.y >= pane.inner_rect.y
+        && row.y < pane.inner_rect.y.saturating_add(pane.inner_rect.height)
+        && row
+            .x
+            .saturating_add(row.cells.len().min(u16::MAX as usize) as u16)
+            <= pane.inner_rect.x.saturating_add(pane.inner_rect.width)
+}
+
 fn pane_geometry_matches(
     left: &crate::protocol::PaneSurfacePane,
     right: &crate::protocol::PaneSurfacePane,
@@ -141,13 +154,7 @@ impl ClientShellState {
             if !row_fits_frame(row, &current.frame)
                 || row.cells.is_empty()
                 || !patch.panes.iter().any(|pane| {
-                    let terminal_row = row.x >= pane.inner_rect.x
-                        && row.y >= pane.inner_rect.y
-                        && row.y < pane.inner_rect.y.saturating_add(pane.inner_rect.height)
-                        && row
-                            .x
-                            .saturating_add(row.cells.len().min(u16::MAX as usize) as u16)
-                            <= pane.inner_rect.x.saturating_add(pane.inner_rect.width);
+                    let terminal_row = row_in_inner_rect(row, pane);
                     let scrollbar_rect = pane.scrollbar_rect.or_else(|| {
                         current
                             .panes
@@ -176,23 +183,24 @@ impl ClientShellState {
             let (cols, rows) = self.last_composed_size.unwrap_or_default();
             self.layout(cols, rows).pane_surface
         });
-        // Presented without `compose()`, so apply the same inactive-pane tint here. Focus is
-        // stable within a patch: `pane_geometry_matches` rejects focus changes, forcing a full
-        // compose.
-        let tint = super::composition::inactive_pane_tint(&self.config.palette);
+        // Presented without `compose()`, so apply the same inactive-pane tint and
+        // de-emphasis here. Focus is stable within a patch: `pane_geometry_matches` rejects
+        // focus changes, forcing a full compose.
+        let inactive_style =
+            fast_path_area.and_then(|_| super::composition::InactivePaneStyle::resolve(self));
         let composed_patch = fast_path_area.map(|area| ClientComposedSurfacePatch {
             rows: patch
                 .rows
                 .iter()
                 .map(|row| {
                     let mut cells = row.cells.clone();
-                    if let Some(tint) = tint {
-                        super::composition::tint_inactive_pane_row(
+                    if let Some(style) = &inactive_style {
+                        super::composition::style_inactive_pane_row(
                             &current.panes,
                             row.x,
                             row.y,
                             &mut cells,
-                            tint,
+                            style,
                         );
                     }
                     crate::protocol::PaneSurfacePatchRow {

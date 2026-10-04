@@ -1150,6 +1150,18 @@
           "description": "Empty terminal cells (0 to 65535) between each pane's frame or edge and its terminal content, on every side. The scrollbar stays in its own column. On small panes the padding shrinks so the terminal keeps at least 4 columns and 2 rows. An invalid value disables only this setting."
         },
         {
+          "key": "ui.inactive_pane_dim_percent",
+          "type": "integer",
+          "default": "0",
+          "description": "Fade the text of unfocused panes in terminal mode by blending text colors toward the terminal default background by this percent (0-100, 0 = off). Display only: backgrounds, borders, faint text, selections, text on its own background color (including reverse video) and pane contents are unchanged. Needs the terminal to report its default colors and palette; unreported colors stay as they are. Malformed values are reported and ignored."
+        },
+        {
+          "key": "ui.inactive_pane_dim_exclude_processes",
+          "type": "list of strings",
+          "default": "[]",
+          "description": "Exact foreground-process basenames whose panes should not be faded. Accepted but not applied yet: Herdr cannot see pane foreground processes when it draws. Malformed values are reported and ignored."
+        },
+        {
           "key": "ui.show_agent_labels_on_pane_borders",
           "type": "boolean",
           "default": "false",
