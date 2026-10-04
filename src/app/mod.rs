@@ -493,6 +493,7 @@ impl App {
             pane_gaps: config.ui.pane_gaps,
             pane_focus_weight: config.ui.pane_focus_weight,
             pane_heavy_borders: config.ui.pane_heavy_borders,
+            pane_gap_cells: config.ui.pane_gap_cells(),
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: String::new(),
@@ -835,6 +836,7 @@ impl App {
                 diagnostics.extend(crate::config::window_title_diagnostics(
                     &config.ui.window_title,
                 ));
+                diagnostics.extend(config.ui.invalid_pane_gap_cells_diagnostic());
 
                 self.loaded_host_cursor = config.ui.host_cursor;
                 self.state.confirm_close = config.ui.confirm_close;
@@ -844,6 +846,7 @@ impl App {
                 self.state.pane_gaps = config.ui.pane_gaps;
                 self.state.pane_focus_weight = config.ui.pane_focus_weight;
                 self.state.pane_heavy_borders = config.ui.pane_heavy_borders;
+                self.state.pane_gap_cells = config.ui.pane_gap_cells();
                 self.state.show_agent_labels_on_pane_borders =
                     config.ui.show_agent_labels_on_pane_borders;
                 self.configure_tab_bar_status(
@@ -2084,6 +2087,53 @@ pane_border_inactive = "reset"
     }
 
     #[test]
+    fn reload_config_applies_and_removes_pane_gap_cells() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-pane-gap-cells");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let mut app = test_app();
+        assert_eq!(app.state.pane_gap_cells, None);
+
+        std::fs::write(&path, "[ui]\npane_gap_cells = 4\n").unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
+        assert_eq!(app.state.pane_spacing(), crate::ui::PaneSpacing::Cells(4));
+
+        std::fs::write(
+            &path,
+            "[ui]\npane_gap_cells = \"wide\"\npane_scrollbars = false\n",
+        )
+        .unwrap();
+        let report = app.reload_config();
+        assert_eq!(app.state.pane_gap_cells, None);
+        assert!(!app.state.pane_scrollbars, "the rest of [ui] still applies");
+        assert_eq!(
+            report.diagnostics,
+            vec![
+                "ui.pane_gap_cells must be an integer from 0 to 65535 (got \"wide\"); using pane_gaps"
+                    .to_string()
+            ]
+        );
+
+        std::fs::write(&path, "[ui]\npane_gap_cells = 0\n").unwrap();
+        app.reload_config();
+        assert_eq!(app.state.pane_spacing(), crate::ui::PaneSpacing::Cells(0));
+
+        std::fs::write(&path, "[ui]\npane_gaps = false\n").unwrap();
+        app.reload_config();
+        assert_eq!(app.state.pane_gap_cells, None);
+        assert_eq!(
+            app.state.pane_spacing(),
+            crate::ui::PaneSpacing::Legacy(false)
+        );
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
     fn reload_config_updates_sidebar_token_rows() {
         let _guard = config_env_lock().lock().unwrap();
         let path = temp_config_path("reload-config-sidebar-tokens");
@@ -3080,6 +3130,95 @@ pane_border_inactive = "reset"
         let spawned = size_of(&app, ws_idx, new_pane);
         relayout(&app, ws_idx);
         assert_eq!(size_of(&app, ws_idx, new_pane), spawned);
+
+        for (_terminal_id, runtime) in app.terminal_runtimes.drain().collect::<Vec<_>>() {
+            runtime.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn hidden_split_panes_start_at_their_size_inside_pane_gap_cells() {
+        let mut app = test_app();
+        app.state.pane_gap_cells = Some(3);
+        app.state.workspaces = vec![Workspace::test_new("visible")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        let area = Rect::new(0, 0, 120, 40);
+        crate::ui::compute_view_without_resizing_panes(
+            &mut app.state,
+            &app.terminal_runtimes,
+            area,
+        );
+
+        let size_of = |app: &App, ws_idx: usize, pane_id| {
+            app.state
+                .runtime_for_pane_in_workspace(&app.terminal_runtimes, ws_idx, pane_id)
+                .unwrap()
+                .current_size()
+        };
+        let relayout = |app: &App, ws_idx: usize| {
+            crate::ui::resize_tab_surface(
+                &app.state,
+                &app.terminal_runtimes,
+                ws_idx,
+                0,
+                area,
+                crate::kitty_graphics::HostCellSize::default(),
+            );
+        };
+        let split_right = |app: &mut App, ws_idx: usize, target| {
+            let response =
+                app.handle_api_request_after_internal_events_drained(crate::api::schema::Request {
+                    id: "req_gap_split_size".into(),
+                    method: crate::api::schema::Method::PaneSplit(
+                        crate::api::schema::PaneSplitParams {
+                            workspace_id: None,
+                            target_pane_id: Some(app.pane_info(ws_idx, target).unwrap().pane_id),
+                            direction: crate::api::schema::SplitDirection::Right,
+                            ratio: Some(0.5),
+                            cwd: None,
+                            focus: false,
+                            right_click: Default::default(),
+                            env: Default::default(),
+                        },
+                    ),
+                });
+            let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+            app.parse_pane_id(response["result"]["pane"]["pane_id"].as_str().unwrap())
+                .unwrap()
+                .1
+        };
+
+        let ws_idx = app
+            .create_workspace_with_options(std::env::temp_dir(), false)
+            .unwrap();
+        assert_eq!(app.state.active, Some(0));
+        let root = app.state.workspaces[ws_idx].tabs[0].root_pane;
+        split_right(&mut app, ws_idx, root);
+
+        // Splitting the root again puts the new pane between two neighbours, so it
+        // is a leading pane that gives up the gap cells on its right edge.
+        let placement = crate::ui::NewPanePlacement::Split {
+            ws_idx,
+            target: root,
+            direction: ratatui::layout::Direction::Horizontal,
+            ratio: 0.5,
+        };
+        let with_gap = app.state.new_pane_size(placement);
+        app.state.pane_gap_cells = None;
+        let without_gap = app.state.new_pane_size(placement);
+        app.state.pane_gap_cells = Some(3);
+        assert!(
+            with_gap.1 < without_gap.1,
+            "gap cells must shrink the spawn width: {with_gap:?} vs {without_gap:?}"
+        );
+
+        let middle = split_right(&mut app, ws_idx, root);
+        let spawned = size_of(&app, ws_idx, middle);
+        assert_eq!(spawned, with_gap);
+        relayout(&app, ws_idx);
+        assert_eq!(size_of(&app, ws_idx, middle), spawned);
 
         for (_terminal_id, runtime) in app.terminal_runtimes.drain().collect::<Vec<_>>() {
             runtime.shutdown();
