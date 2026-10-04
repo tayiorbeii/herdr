@@ -97,6 +97,8 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # popup_bg = "#181825"
 # popup_border = "#89b4fa"
 # sidebar_bg = "#181825"
+# Unfocused panes only; tints terminal-default backgrounds, never program colors.
+# pane_inactive_bg = "#11111b"
 # active_row_bg = "#1e1e2e"
 # selection_bg = "#313244"
 # panel_bg = "reset"
@@ -110,6 +112,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # active_tab_bg = "#1e66f5"
 # pane_border_active = "#1e66f5"
 # popup_border = "#1e66f5"
+# pane_inactive_bg = "#e6e9ef"
 # panel_bg = "#eff1f5"
 # text = "#4c4f69"
 #
@@ -118,6 +121,7 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # active_tab_bg = "#89b4fa"
 # pane_border_active = "#89b4fa"
 # popup_border = "#89b4fa"
+# pane_inactive_bg = "#11111b"
 # panel_bg = "#1e1e2e"
 # text = "#cdd6f4"
 

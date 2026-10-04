@@ -176,14 +176,30 @@ impl ClientShellState {
             let (cols, rows) = self.last_composed_size.unwrap_or_default();
             self.layout(cols, rows).pane_surface
         });
+        // Presented without `compose()`, so apply the same inactive-pane tint here. Focus is
+        // stable within a patch: `pane_geometry_matches` rejects focus changes, forcing a full
+        // compose.
+        let tint = super::composition::inactive_pane_tint(&self.config.palette);
         let composed_patch = fast_path_area.map(|area| ClientComposedSurfacePatch {
             rows: patch
                 .rows
                 .iter()
-                .map(|row| crate::protocol::PaneSurfacePatchRow {
-                    x: area.x.saturating_add(row.x),
-                    y: area.y.saturating_add(row.y),
-                    cells: row.cells.clone(),
+                .map(|row| {
+                    let mut cells = row.cells.clone();
+                    if let Some(tint) = tint {
+                        super::composition::tint_inactive_pane_row(
+                            &current.panes,
+                            row.x,
+                            row.y,
+                            &mut cells,
+                            tint,
+                        );
+                    }
+                    crate::protocol::PaneSurfacePatchRow {
+                        x: area.x.saturating_add(row.x),
+                        y: area.y.saturating_add(row.y),
+                        cells,
+                    }
                 })
                 .collect(),
             cursor: patch
