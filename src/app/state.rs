@@ -998,6 +998,8 @@ pub struct AppState {
     /// Effective `ui.pane_padding_cells`; 0 keeps the unpadded content rect.
     pub pane_padding_cells: u16,
     pub show_agent_labels_on_pane_borders: bool,
+    pub pane_title_tokens: Option<Vec<crate::config::AgentSidebarToken>>,
+    pub pane_manual_label_first: bool,
     pub tab_bar_right: Vec<TabBarStatusSegment>,
     pub tab_bar_right_separator: String,
     /// Expose the focused pane's cursor anchor to the outer terminal even when
@@ -1236,6 +1238,8 @@ impl AppState {
             pane_gap_cells: None,
             pane_padding_cells: 0,
             show_agent_labels_on_pane_borders: false,
+            pane_title_tokens: None,
+            pane_manual_label_first: false,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: " ".into(),
             reveal_hidden_cursor_for_cjk_ime: false,

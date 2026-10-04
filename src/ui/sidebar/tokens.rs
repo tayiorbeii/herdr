@@ -25,7 +25,7 @@ pub(crate) enum ResolvedTokenKind {
 }
 
 impl ResolvedTokenKind {
-    fn text_value(&self) -> Option<&str> {
+    pub(crate) fn text_value(&self) -> Option<&str> {
         match self {
             Self::StateText(value)
             | Self::Machine(value)
@@ -52,6 +52,23 @@ impl ResolvedToken {
     }
 }
 
+/// Read access to custom token values without requiring a particular map type.
+pub(crate) trait TokenValues {
+    fn token_value(&self, name: &str) -> Option<&str>;
+}
+
+impl TokenValues for std::collections::HashMap<String, String> {
+    fn token_value(&self, name: &str) -> Option<&str> {
+        self.get(name).map(String::as_str)
+    }
+}
+
+impl TokenValues for crate::metadata_tokens::MetadataTokens {
+    fn token_value(&self, name: &str) -> Option<&str> {
+        self.get(name)
+    }
+}
+
 pub(crate) struct AgentTokenContext<'a> {
     pub(crate) machine: Option<&'a str>,
     pub(crate) workspace: &'a str,
@@ -61,7 +78,7 @@ pub(crate) struct AgentTokenContext<'a> {
     pub(crate) terminal_title: Option<&'a str>,
     pub(crate) terminal_title_stripped: Option<&'a str>,
     pub(crate) canonical_agent: Option<crate::detect::Agent>,
-    pub(crate) tokens: &'a std::collections::HashMap<String, String>,
+    pub(crate) tokens: &'a dyn TokenValues,
 }
 
 pub(crate) fn agent_rows(
@@ -73,50 +90,57 @@ pub(crate) fn agent_rows(
         .rows_for_agent(context.canonical_agent)
         .iter()
         .filter_map(|row| {
-            let resolved = row
-                .iter()
-                .filter_map(|configured| {
-                    let (token, style) = configured.parts();
-                    let kind = match token {
-                        AgentSidebarToken::StateIcon => Some(ResolvedTokenKind::StateIcon),
-                        AgentSidebarToken::StateText => {
-                            Some(ResolvedTokenKind::StateText(state_text.to_string()))
-                        }
-                        AgentSidebarToken::Machine => context
-                            .machine
-                            .map(|value| ResolvedTokenKind::Machine(value.to_string())),
-                        AgentSidebarToken::Workspace => {
-                            Some(ResolvedTokenKind::Workspace(context.workspace.to_string()))
-                        }
-                        AgentSidebarToken::Tab => context
-                            .tab
-                            .map(|value| ResolvedTokenKind::Tab(value.to_string())),
-                        AgentSidebarToken::Pane => context
-                            .pane
-                            .map(|value| ResolvedTokenKind::Pane(value.to_string())),
-                        AgentSidebarToken::Agent => context
-                            .agent_label
-                            .map(|value| ResolvedTokenKind::Agent(value.to_string())),
-                        AgentSidebarToken::TerminalTitle => context
-                            .terminal_title
-                            .map(|value| ResolvedTokenKind::TerminalTitle(value.to_string())),
-                        AgentSidebarToken::TerminalTitleStripped => context
-                            .terminal_title_stripped
-                            .map(|value| ResolvedTokenKind::TerminalTitle(value.to_string())),
-                        AgentSidebarToken::Custom(name) => context
-                            .tokens
-                            .get(name)
-                            .cloned()
-                            .map(ResolvedTokenKind::Custom),
-                        AgentSidebarToken::Styled { .. } => None,
-                    }?;
-                    let style = kind
-                        .text_value()
-                        .map_or(Some(style), |value| configured.style_for_value(value))?;
-                    Some(ResolvedToken::new(kind, style))
-                })
-                .collect::<Vec<_>>();
+            let resolved = agent_row(row, &context, state_text);
             (!resolved.is_empty()).then_some(resolved)
+        })
+        .collect()
+}
+
+/// Resolve one configured agent token row, skipping missing and rule-hidden tokens.
+pub(crate) fn agent_row(
+    row: &[AgentSidebarToken],
+    context: &AgentTokenContext<'_>,
+    state_text: &str,
+) -> Vec<ResolvedToken> {
+    row.iter()
+        .filter_map(|configured| {
+            let (token, style) = configured.parts();
+            let kind = match token {
+                AgentSidebarToken::StateIcon => Some(ResolvedTokenKind::StateIcon),
+                AgentSidebarToken::StateText => {
+                    Some(ResolvedTokenKind::StateText(state_text.to_string()))
+                }
+                AgentSidebarToken::Machine => context
+                    .machine
+                    .map(|value| ResolvedTokenKind::Machine(value.to_string())),
+                AgentSidebarToken::Workspace => {
+                    Some(ResolvedTokenKind::Workspace(context.workspace.to_string()))
+                }
+                AgentSidebarToken::Tab => context
+                    .tab
+                    .map(|value| ResolvedTokenKind::Tab(value.to_string())),
+                AgentSidebarToken::Pane => context
+                    .pane
+                    .map(|value| ResolvedTokenKind::Pane(value.to_string())),
+                AgentSidebarToken::Agent => context
+                    .agent_label
+                    .map(|value| ResolvedTokenKind::Agent(value.to_string())),
+                AgentSidebarToken::TerminalTitle => context
+                    .terminal_title
+                    .map(|value| ResolvedTokenKind::TerminalTitle(value.to_string())),
+                AgentSidebarToken::TerminalTitleStripped => context
+                    .terminal_title_stripped
+                    .map(|value| ResolvedTokenKind::TerminalTitle(value.to_string())),
+                AgentSidebarToken::Custom(name) => context
+                    .tokens
+                    .token_value(name)
+                    .map(|value| ResolvedTokenKind::Custom(value.to_string())),
+                AgentSidebarToken::Styled { .. } => None,
+            }?;
+            let style = kind
+                .text_value()
+                .map_or(Some(style), |value| configured.style_for_value(value))?;
+            Some(ResolvedToken::new(kind, style))
         })
         .collect()
 }
@@ -126,7 +150,7 @@ pub(crate) struct SpaceTokenContext<'a> {
     pub(crate) branch: Option<&'a str>,
     pub(crate) state_text: &'a str,
     pub(crate) ahead_behind: Option<(usize, usize)>,
-    pub(crate) tokens: &'a std::collections::HashMap<String, String>,
+    pub(crate) tokens: &'a dyn TokenValues,
     pub(crate) suppress_git_details: bool,
 }
 
@@ -161,9 +185,8 @@ pub(crate) fn space_rows(
                         SpaceSidebarToken::GitStatus => None,
                         SpaceSidebarToken::Custom(name) => context
                             .tokens
-                            .get(name)
-                            .cloned()
-                            .map(ResolvedTokenKind::Custom),
+                            .token_value(name)
+                            .map(|value| ResolvedTokenKind::Custom(value.to_string())),
                         SpaceSidebarToken::Styled { .. } => None,
                     }?;
                     let style = kind
