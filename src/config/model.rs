@@ -1065,6 +1065,11 @@ pub struct UiConfig {
     pub pane_padding_cells: PanePaddingCellsConfig,
     /// Show agent labels in split pane borders when no manual pane label is set. Default: false.
     pub show_agent_labels_on_pane_borders: bool,
+    /// Compose pane border titles from one agent sidebar token row. Absent keeps the plain title.
+    #[serde(deserialize_with = "super::sidebar::deserialize_optional_agent_sidebar_row")]
+    pub pane_title_tokens: Option<Vec<super::AgentSidebarToken>>,
+    /// Let a nonempty manual pane label win before reported titles and tokens. Default: false.
+    pub pane_manual_label_first: bool,
     /// Hide the tab row when the workspace has one tab. Default: false.
     pub hide_tab_bar_when_single_tab: bool,
     /// Desktop tab row placement. Default: top.
@@ -1307,6 +1312,8 @@ impl Default for UiConfig {
             pane_gap_cells: None,
             pane_padding_cells: PanePaddingCellsConfig::default(),
             show_agent_labels_on_pane_borders: false,
+            pane_title_tokens: None,
+            pane_manual_label_first: false,
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
             tab_bar_right: Vec::new(),
@@ -2010,6 +2017,63 @@ tab_bar_right_separator = " · "
             TabBarRightEntryConfig::Hostname
         ));
         assert_eq!(config.ui.tab_bar_right_separator, " · ");
+    }
+
+    #[test]
+    fn pane_title_tokens_parse_sidebar_row_shape() {
+        use crate::config::AgentSidebarToken;
+        let default_config = Config::default();
+        assert_eq!(default_config.ui.pane_title_tokens, None);
+        assert!(!default_config.ui.pane_manual_label_first);
+
+        let config: Config = toml::from_str(
+            r##"
+[ui]
+pane_manual_label_first = true
+pane_title_tokens = ["tab", { token = "$task", fg = "#f38ba8", bold = true, dim = false }]
+"##,
+        )
+        .unwrap();
+        assert!(config.ui.pane_manual_label_first);
+        let row = config.ui.pane_title_tokens.unwrap();
+        assert_eq!(row[0], AgentSidebarToken::Tab);
+        let AgentSidebarToken::Styled {
+            token,
+            style,
+            rules,
+        } = &row[1]
+        else {
+            panic!("expected styled token");
+        };
+        assert_eq!(**token, AgentSidebarToken::Custom("task".into()));
+        assert_eq!(
+            style.fg.map(|fg| fg.ratatui()),
+            Some(ratatui::style::Color::Rgb(0xf3, 0x8b, 0xa8))
+        );
+        assert_eq!((style.bold, style.dim), (Some(true), Some(false)));
+        assert!(rules.is_empty());
+
+        let empty: Config = toml::from_str("[ui]\npane_title_tokens = []").unwrap();
+        assert_eq!(empty.ui.pane_title_tokens, Some(Vec::new()));
+    }
+
+    #[test]
+    fn pane_title_tokens_reject_invalid_tokens() {
+        for toml in [
+            "[ui]\npane_title_tokens = [\"unknown\"]",
+            "[ui]\npane_title_tokens = [\"$bad name\"]",
+            "[ui]\npane_title_tokens = [{ token = \"$task\", fg = \"red\" }]",
+            "[ui]\npane_title_tokens = \"$task\"",
+            "[ui]\npane_manual_label_first = \"yes\"",
+        ] {
+            assert!(toml::from_str::<Config>(toml).is_err(), "{toml}");
+        }
+        let too_many = format!(
+            "[ui]\npane_title_tokens = [{}]",
+            vec!["\"tab\""; 17].join(", ")
+        );
+        let error = toml::from_str::<Config>(&too_many).unwrap_err().to_string();
+        assert!(error.contains("at most 16 tokens"), "{error}");
     }
 
     #[test]
