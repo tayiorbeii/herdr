@@ -215,6 +215,8 @@ pub(crate) fn render_sidebar(
         crate::ui::expanded_sidebar_sections(area, state.sidebar_section_split);
     hits.sidebar_section_divider =
         crate::ui::sidebar_section_divider_rect(area, state.sidebar_section_split);
+    let workspace_area =
+        crate::ui::inset_sidebar_section(workspace_area, config.sidebar_padding_cells);
     put_text(
         buffer,
         workspace_area.x,
@@ -400,12 +402,23 @@ pub(crate) fn render_sidebar(
             1,
         );
         if attention {
-            let start_x = workspace_area.right().saturating_sub(6);
+            // Keep the button inside padded content; without horizontal padding the
+            // unclipped legacy placement is preserved.
+            let clip_right = if workspace_area.x == area.x {
+                u16::MAX
+            } else {
+                workspace_area.right()
+            };
+            let start_x = workspace_area
+                .right()
+                .saturating_sub(6)
+                .max(workspace_area.x);
+            let menu_x = start_x.saturating_add(2);
             put_text(
                 buffer,
                 start_x,
                 footer_y,
-                2,
+                clip_right.saturating_sub(start_x).min(2),
                 "● ",
                 Style::default()
                     .fg(palette.accent)
@@ -413,9 +426,9 @@ pub(crate) fn render_sidebar(
             );
             put_text(
                 buffer,
-                start_x.saturating_add(2),
+                menu_x,
                 footer_y,
-                4,
+                clip_right.saturating_sub(menu_x).min(4),
                 "menu",
                 Style::default().fg(palette.overlay0),
             );

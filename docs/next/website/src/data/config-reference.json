@@ -1002,6 +1002,12 @@
           ]
         },
         {
+          "key": "ui.sidebar_padding_cells",
+          "type": "integer",
+          "default": "0",
+          "description": "Empty cells inside each expanded sidebar section, on every side. Reduced only to keep one usable cell; the sidebar width, section split and dividers do not change."
+        },
+        {
           "key": "ui.mobile_width_threshold",
           "type": "integer",
           "default": "64",
