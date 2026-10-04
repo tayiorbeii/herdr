@@ -980,6 +980,13 @@ pub struct UiConfig {
     pub pane_scrollbars: bool,
     /// Keep split panes visually separated instead of sharing divider borders. Default: true.
     pub pane_gaps: bool,
+    /// Line style of every pane frame (see `PaneBorderStyle`). Kept raw so a
+    /// malformed value disables only this key. Default: unset (stock light lines).
+    pub pane_border_style: Option<toml::Value>,
+    /// Line style of the focused pane's frame; falls back to `pane_border_style`. Default: unset.
+    pub pane_border_style_active: Option<toml::Value>,
+    /// Line style of unfocused pane frames; falls back to `pane_border_style`. Default: unset.
+    pub pane_border_style_inactive: Option<toml::Value>,
     /// Show agent labels in split pane borders when no manual pane label is set. Default: false.
     pub show_agent_labels_on_pane_borders: bool,
     /// Hide the tab row when the workspace has one tab. Default: false.
@@ -1217,6 +1224,9 @@ impl Default for UiConfig {
             rounded_borders: false,
             pane_scrollbars: true,
             pane_gaps: true,
+            pane_border_style: None,
+            pane_border_style_active: None,
+            pane_border_style_inactive: None,
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
@@ -1243,6 +1253,117 @@ impl UiConfig {
 
     pub fn right_click_passthrough_modifiers(&self) -> Option<KeyModifiers> {
         self.right_click_passthrough_modifier.modifiers()
+    }
+
+    /// The pane border style keys; malformed values count as unset.
+    pub fn pane_border_styles(&self) -> PaneBorderStyles {
+        let parse = |value: &Option<toml::Value>| {
+            value
+                .as_ref()
+                .and_then(toml::Value::as_str)
+                .and_then(PaneBorderStyle::parse)
+        };
+        PaneBorderStyles {
+            all: parse(&self.pane_border_style),
+            active: parse(&self.pane_border_style_active),
+            inactive: parse(&self.pane_border_style_inactive),
+        }
+    }
+
+    pub(crate) fn invalid_pane_border_style_diagnostics(&self) -> Vec<String> {
+        [
+            ("pane_border_style", &self.pane_border_style, "light"),
+            (
+                "pane_border_style_active",
+                &self.pane_border_style_active,
+                "pane_border_style",
+            ),
+            (
+                "pane_border_style_inactive",
+                &self.pane_border_style_inactive,
+                "pane_border_style",
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(key, value, fallback)| {
+            let value = value.as_ref()?;
+            value
+                .as_str()
+                .and_then(PaneBorderStyle::parse)
+                .is_none()
+                .then(|| {
+                    format!(
+                        "ui.{key} must be light, rounded, heavy, double, light-dashed-N, heavy-dashed-N or rounded-dashed-N with N from 2 to 4 (got {value}); using {fallback}"
+                    )
+                })
+        })
+        .collect()
+    }
+}
+
+/// Dash count of a dashed pane border line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BorderDash {
+    Two,
+    Three,
+    Four,
+}
+
+/// One `ui.pane_border_style*` value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaneBorderStyle {
+    Light,
+    Rounded,
+    Heavy,
+    Double,
+    LightDashed(BorderDash),
+    HeavyDashed(BorderDash),
+    RoundedDashed(BorderDash),
+}
+
+impl PaneBorderStyle {
+    /// Every accepted name, in documentation order.
+    pub const NAMES: [(&'static str, Self); 13] = [
+        ("light", Self::Light),
+        ("rounded", Self::Rounded),
+        ("heavy", Self::Heavy),
+        ("double", Self::Double),
+        ("light-dashed-2", Self::LightDashed(BorderDash::Two)),
+        ("light-dashed-3", Self::LightDashed(BorderDash::Three)),
+        ("light-dashed-4", Self::LightDashed(BorderDash::Four)),
+        ("heavy-dashed-2", Self::HeavyDashed(BorderDash::Two)),
+        ("heavy-dashed-3", Self::HeavyDashed(BorderDash::Three)),
+        ("heavy-dashed-4", Self::HeavyDashed(BorderDash::Four)),
+        ("rounded-dashed-2", Self::RoundedDashed(BorderDash::Two)),
+        ("rounded-dashed-3", Self::RoundedDashed(BorderDash::Three)),
+        ("rounded-dashed-4", Self::RoundedDashed(BorderDash::Four)),
+    ];
+
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::NAMES
+            .iter()
+            .find_map(|&(candidate, style)| (candidate == name).then_some(style))
+    }
+}
+
+/// Parsed `ui.pane_border_style`, `_active` and `_inactive`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PaneBorderStyles {
+    pub all: Option<PaneBorderStyle>,
+    pub active: Option<PaneBorderStyle>,
+    pub inactive: Option<PaneBorderStyle>,
+}
+
+impl PaneBorderStyles {
+    /// `(active, inactive)` after `state override -> pane_border_style -> light`,
+    /// or `None` when every key is unset so the stock renderer runs.
+    pub fn resolved(self) -> Option<(PaneBorderStyle, PaneBorderStyle)> {
+        if self == Self::default() {
+            return None;
+        }
+        let resolve =
+            |state: Option<PaneBorderStyle>| state.or(self.all).unwrap_or(PaneBorderStyle::Light);
+        Some((resolve(self.active), resolve(self.inactive)))
     }
 }
 
@@ -1516,12 +1637,124 @@ status_indicators = "symbols"
     }
 
     #[test]
+    fn pane_border_styles_parse_every_name_and_resolve_by_state() {
+        assert_eq!(PaneBorderStyle::NAMES.len(), 13);
+        for (name, style) in PaneBorderStyle::NAMES {
+            let config: Config =
+                toml::from_str(&format!("[ui]\npane_border_style_inactive = \"{name}\"\n"))
+                    .unwrap();
+            assert_eq!(
+                config.ui.pane_border_styles().inactive,
+                Some(style),
+                "{name}"
+            );
+            assert!(config.collect_diagnostics().is_empty(), "{name}");
+        }
+
+        use PaneBorderStyle::{Double, Heavy, Light, Rounded};
+        let styles = |all, active, inactive| PaneBorderStyles {
+            all,
+            active,
+            inactive,
+        };
+        assert_eq!(styles(None, None, None).resolved(), None);
+        assert_eq!(
+            styles(Some(Light), None, None).resolved(),
+            Some((Light, Light)),
+            "an explicit light still opts in"
+        );
+        assert_eq!(
+            styles(None, Some(Heavy), None).resolved(),
+            Some((Heavy, Light))
+        );
+        assert_eq!(
+            styles(None, None, Some(Rounded)).resolved(),
+            Some((Light, Rounded))
+        );
+        assert_eq!(
+            styles(Some(Heavy), Some(Double), None).resolved(),
+            Some((Double, Heavy))
+        );
+        assert_eq!(
+            styles(Some(Heavy), Some(Double), Some(Rounded)).resolved(),
+            Some((Double, Rounded))
+        );
+    }
+
+    #[test]
+    fn malformed_pane_border_style_reports_field_diagnostic_and_keeps_ui() {
+        for key in [
+            "pane_border_style",
+            "pane_border_style_active",
+            "pane_border_style_inactive",
+        ] {
+            for raw in [
+                "\"thick\"",
+                "\"Heavy\"",
+                "\"light-dashed-5\"",
+                "\"double-dashed-2\"",
+                "\"\"",
+                "2",
+                "true",
+                "[\"heavy\"]",
+                "{ style = \"heavy\" }",
+            ] {
+                let other = if key == "pane_border_style" {
+                    "pane_border_style_active = \"double\""
+                } else {
+                    "pane_border_style = \"heavy\""
+                };
+                let config: Config = toml::from_str(&format!(
+                    "[ui]\n{key} = {raw}\n{other}\npane_scrollbars = false\n"
+                ))
+                .unwrap_or_else(|err| panic!("{key} = {raw} must not reject [ui]: {err}"));
+                let styles = config.ui.pane_border_styles();
+                assert!(
+                    !config.ui.pane_scrollbars,
+                    "{key} = {raw}: [ui] still applies"
+                );
+                let (expected, fallback) = match key {
+                    "pane_border_style" => (
+                        PaneBorderStyles {
+                            active: Some(PaneBorderStyle::Double),
+                            ..PaneBorderStyles::default()
+                        },
+                        "light",
+                    ),
+                    _ => (
+                        PaneBorderStyles {
+                            all: Some(PaneBorderStyle::Heavy),
+                            ..PaneBorderStyles::default()
+                        },
+                        "pane_border_style",
+                    ),
+                };
+                assert_eq!(styles, expected, "{key} = {raw}: only this key is disabled");
+                let diagnostics = config.collect_diagnostics();
+                assert_eq!(diagnostics.len(), 1, "{key} = {raw}: {diagnostics:?}");
+                assert!(
+                    diagnostics[0].starts_with(&format!(
+                        "ui.{key} must be light, rounded, heavy, double, light-dashed-N, heavy-dashed-N or rounded-dashed-N with N from 2 to 4 (got "
+                    )) && diagnostics[0].ends_with(&format!("); using {fallback}")),
+                    "{key} = {raw}: {diagnostics:?}"
+                );
+                assert!(!diagnostics[0].contains('\n'));
+            }
+        }
+    }
+
+    #[test]
     fn pane_appearance_defaults_and_parse() {
         let default_config = Config::default();
         assert_eq!(default_config.ui.pane_borders, PaneBordersConfig::Auto);
         assert!(default_config.ui.pane_outer_borders);
         assert!(default_config.ui.pane_scrollbars);
         assert!(default_config.ui.pane_gaps);
+        assert_eq!(
+            default_config.ui.pane_border_styles(),
+            PaneBorderStyles::default()
+        );
+        assert_eq!(default_config.ui.pane_border_styles().resolved(), None);
         assert!(!default_config.ui.show_agent_labels_on_pane_borders);
         assert!(!default_config.ui.hide_tab_bar_when_single_tab);
         assert_eq!(
@@ -1537,6 +1770,8 @@ pane_borders = "always"
 pane_outer_borders = false
 pane_scrollbars = false
 pane_gaps = true
+pane_border_style = "rounded"
+pane_border_style_active = "heavy-dashed-3"
 show_agent_labels_on_pane_borders = true
 hide_tab_bar_when_single_tab = true
 tab_bar_position = "bottom"
@@ -1554,6 +1789,14 @@ tab_bar_right_separator = " · "
         assert!(!config.ui.pane_outer_borders);
         assert!(!config.ui.pane_scrollbars);
         assert!(config.ui.pane_gaps);
+        assert_eq!(
+            config.ui.pane_border_styles(),
+            PaneBorderStyles {
+                all: Some(PaneBorderStyle::Rounded),
+                active: Some(PaneBorderStyle::HeavyDashed(BorderDash::Three)),
+                inactive: None,
+            }
+        );
         assert!(config.ui.show_agent_labels_on_pane_borders);
         assert!(config.ui.hide_tab_bar_when_single_tab);
         assert_eq!(config.ui.tab_bar_position, TabBarPositionConfig::Bottom);

@@ -327,6 +327,14 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Keep split panes visually separated instead of sharing divider borders.
 # pane_gaps = true
 
+# Pane frame line style: light, rounded, heavy, double, light-dashed-2/3/4,
+# heavy-dashed-2/3/4 or rounded-dashed-2/3/4. pane_border_style applies to every pane;
+# the _active and _inactive keys override it for the focused or unfocused panes.
+# Unset keeps the stock light lines. Geometry and shared dividers are unchanged.
+# pane_border_style = "light"
+# pane_border_style_active = "heavy"
+# pane_border_style_inactive = "rounded"
+
 # Show detected/reported agent labels in split pane borders when no manual pane name is set.
 # show_agent_labels_on_pane_borders = false
 
