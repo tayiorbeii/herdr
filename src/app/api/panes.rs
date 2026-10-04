@@ -2114,12 +2114,13 @@ impl App {
         let tab = ws.tabs.get(tab_idx)?;
         let area = self.state.view.terminal_area;
         let focused_pane_id = self.public_pane_id(ws_idx, tab.layout.focused())?;
-        let panes = crate::ui::apply_pane_chrome(
+        let panes = crate::ui::apply_pane_spacing(
             tab.layout.panes(area),
             self.state.pane_borders,
-            self.state.pane_gaps,
+            self.state.pane_spacing(),
             self.state.pane_outer_borders,
         )
+        .0
         .into_iter()
         .filter_map(|pane| {
             Some(PaneLayoutPane {
