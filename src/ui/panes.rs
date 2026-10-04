@@ -3920,6 +3920,81 @@ mod tests {
         }
     }
 
+    /// C1 x A1/GW1/FC1: composed titles still render on heavy and double
+    /// frames, take FC1's focused/unfocused colors as their fallback, keep token
+    /// styles, and keep focus BOLD.
+    #[test]
+    fn pane_title_tokens_render_on_weighted_frames_with_focus_colors() {
+        let active = Color::Rgb(0xff, 0x00, 0x00);
+        let inactive = Color::Rgb(0x00, 0xff, 0x00);
+        let token_fg = Color::Rgb(0xf3, 0x8b, 0xa8);
+        for (heavy, weight, focused_line, unfocused_line, focused_corner) in [
+            (false, false, "─", "─", "┌"),
+            (false, true, "━", "─", "┏"),
+            (true, false, "━", "━", "┏"),
+            (true, true, "═", "━", "╔"),
+        ] {
+            let (mut app, panes) = title_test_app(true);
+            for pane in &panes {
+                let terminal = title_terminal(&mut app, *pane);
+                set_tokens(terminal, &[("task", "fix")]);
+                terminal.set_manual_label("api".into());
+            }
+            app.pane_title_tokens = Some(title_row(
+                r##"["workspace", { token = "$task", fg = "#f38ba8", dim = true }, "pane"]"##,
+            ));
+            app.pane_heavy_borders = heavy;
+            app.pane_focus_weight = weight;
+            app.palette.pane_border_active = Some(active);
+            app.palette.pane_border_inactive = Some(inactive);
+            let area = Rect::new(0, 0, 60, 6);
+            let buffer = render_title_tab(&app, area);
+            let right = title_pane_rect(&app, area, panes[1]);
+            let case = format!("heavy={heavy} weight={weight}");
+
+            let expected = " repo · fix · api ";
+            let width = expected.chars().count() as u16;
+            let rx = right.x + 1;
+            assert_eq!(row_text(&buffer, 0, 1..1 + width), expected, "{case}");
+            assert_eq!(row_text(&buffer, 0, rx..rx + width), expected, "{case}");
+            assert_eq!(buffer[(0, 0)].symbol(), focused_corner, "{case}");
+            for (x0, focused, fallback, line) in [
+                (1, true, active, focused_line),
+                (rx, false, inactive, unfocused_line),
+            ] {
+                let bold = if focused {
+                    Modifier::BOLD
+                } else {
+                    Modifier::empty()
+                };
+                assert_cells_style(
+                    &buffer,
+                    0,
+                    x0..x0 + 8,
+                    Style::default().fg(fallback).add_modifier(bold),
+                );
+                assert_cells_style(
+                    &buffer,
+                    0,
+                    x0 + 8..x0 + 11,
+                    Style::default()
+                        .fg(token_fg)
+                        .add_modifier(Modifier::DIM | bold),
+                );
+                assert_cells_style(
+                    &buffer,
+                    0,
+                    x0 + 11..x0 + width,
+                    Style::default().fg(fallback).add_modifier(bold),
+                );
+                // The frame continues after the title in the pane's weight and color.
+                let after = &buffer[(x0 + width, 0)];
+                assert_eq!(after.symbol(), line, "{case} focused={focused}");
+                assert_eq!(after.fg, fallback, "{case} focused={focused}");
+            }
+        }
+    }
+
     #[test]
     fn pane_title_tokens_compose_builtin_and_custom_with_token_styles() {
         let (mut app, panes) = title_test_app(true);
