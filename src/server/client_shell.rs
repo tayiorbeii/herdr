@@ -989,4 +989,183 @@ mod tests {
             "separated panes round each frame"
         );
     }
+
+    fn focus_weight_app(pane_focus_weight: bool) -> (crate::app::App, [crate::layout::PaneId; 2]) {
+        let mut config = crate::config::Config::default();
+        config.ui.pane_focus_weight = pane_focus_weight;
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::new(
+            &config,
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let mut workspace = crate::workspace::Workspace::test_new("focus");
+        let left = workspace.tabs[0].root_pane;
+        let right = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        workspace.tabs[0].layout.focus_pane(left);
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        crate::ui::compute_view_with_runtime_registry(
+            &mut app.state,
+            &crate::terminal::TerminalRuntimeRegistry::new(),
+            Rect::new(0, 0, 40, 12),
+        );
+        (app, [left, right])
+    }
+
+    fn focus_weight_surface(app: &mut crate::app::App) -> RenderedPaneSurface {
+        let target = Some(crate::ui::TabSurfaceTarget {
+            workspace_index: 0,
+            tab_index: app.state.workspaces[0].active_tab_index(),
+        });
+        render_pane_surface(
+            app,
+            target,
+            Rect::new(0, 0, 40, 12),
+            true,
+            true,
+            crate::kitty_graphics::HostCellSize {
+                width_px: 1,
+                height_px: 1,
+            },
+            &crate::kitty_graphics::surface::DeliveryCache::default(),
+            1,
+        )
+        .expect("pane surface")
+    }
+
+    fn surface_corner(surface: &RenderedPaneSurface, pane_index: usize) -> &str {
+        let rect = surface.panes[pane_index].rect;
+        let index = usize::from(rect.y) * usize::from(surface.frame.width) + usize::from(rect.x);
+        &surface.frame.cells[index].symbol
+    }
+
+    /// Pane geometry with public ids cleared; each test app gets fresh ids.
+    fn anonymous_panes(surface: &RenderedPaneSurface) -> Vec<protocol::PaneSurfacePane> {
+        surface
+            .panes
+            .iter()
+            .cloned()
+            .map(|mut pane| {
+                pane.pane_id.clear();
+                pane
+            })
+            .collect()
+    }
+
+    /// Geometry, hit data and every non-symbol cell attribute are unchanged; only
+    /// light line glyphs on the focused frame become heavy.
+    fn assert_glyph_only_surface_change(
+        plain: &RenderedPaneSurface,
+        emphasized: &RenderedPaneSurface,
+    ) {
+        assert_eq!(anonymous_panes(plain), anonymous_panes(emphasized));
+        assert_eq!(plain.splits, emphasized.splits);
+        assert_eq!(plain.frame.width, emphasized.frame.width);
+        assert_eq!(plain.frame.height, emphasized.frame.height);
+        assert_eq!(plain.frame.cursor, emphasized.frame.cursor);
+        let mut changed = 0;
+        for (before, after) in plain.frame.cells.iter().zip(&emphasized.frame.cells) {
+            assert_eq!(
+                (
+                    before.fg,
+                    before.bg,
+                    before.modifier,
+                    before.skip,
+                    before.hyperlink
+                ),
+                (
+                    after.fg,
+                    after.bg,
+                    after.modifier,
+                    after.skip,
+                    after.hyperlink
+                )
+            );
+            if before.symbol != after.symbol {
+                assert!("─│┌┐└┘├┤┬┴┼".contains(before.symbol.as_str()));
+                changed += 1;
+            }
+        }
+        assert!(changed > 0);
+    }
+
+    #[test]
+    fn pane_focus_weight_follows_keyboard_and_mouse_focus_with_unchanged_geometry() {
+        let (mut plain_app, _) = focus_weight_app(false);
+        let (mut app, [left, right]) = focus_weight_app(true);
+        let left_index = |surface: &RenderedPaneSurface, app: &crate::app::App| {
+            let public = app.public_pane_id(0, left).unwrap();
+            surface
+                .panes
+                .iter()
+                .position(|pane| pane.pane_id == public)
+                .unwrap()
+        };
+
+        let plain = focus_weight_surface(&mut plain_app);
+        let surface = focus_weight_surface(&mut app);
+        assert_glyph_only_surface_change(&plain, &surface);
+        let left_at = left_index(&surface, &app);
+        let right_at = 1 - left_at;
+        assert_eq!(surface_corner(&plain, left_at), "┌");
+        assert_eq!(surface_corner(&surface, left_at), "┏");
+        assert_eq!(surface_corner(&surface, right_at), "┌");
+
+        // Keyboard focus movement goes through `pane.focus_direction`.
+        app.handle_api_request(crate::api::schema::Request {
+            id: "keyboard".into(),
+            method: crate::api::schema::Method::PaneFocusDirection(
+                crate::api::schema::PaneFocusDirectionParams {
+                    pane_id: app.public_pane_id(0, left),
+                    direction: crate::api::schema::PaneDirection::Right,
+                },
+            ),
+        });
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(right));
+        let surface = focus_weight_surface(&mut app);
+        assert_eq!(surface_corner(&surface, left_at), "┌");
+        assert_eq!(surface_corner(&surface, right_at), "┏");
+        assert_eq!(
+            anonymous_panes(&surface),
+            anonymous_panes(&plain)
+                .into_iter()
+                .map(|mut pane| {
+                    pane.focused = !pane.focused;
+                    pane
+                })
+                .collect::<Vec<_>>()
+        );
+
+        // A mouse click on a pane sends `pane.focus`.
+        app.handle_api_request(crate::api::schema::Request {
+            id: "mouse".into(),
+            method: crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget {
+                pane_id: app.public_pane_id(0, left).unwrap(),
+            }),
+        });
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(left));
+        let surface = focus_weight_surface(&mut app);
+        assert_eq!(surface_corner(&surface, left_at), "┏");
+        assert_eq!(surface_corner(&surface, right_at), "┌");
+        assert_glyph_only_surface_change(&plain, &surface);
+    }
+
+    #[test]
+    fn pane_focus_weight_zoomed_pane_is_heavy() {
+        let (mut plain_app, _) = focus_weight_app(false);
+        let (mut app, _) = focus_weight_app(true);
+        plain_app.state.workspaces[0].tabs[0].zoomed = true;
+        app.state.workspaces[0].tabs[0].zoomed = true;
+
+        let plain = focus_weight_surface(&mut plain_app);
+        let surface = focus_weight_surface(&mut app);
+        assert_eq!(surface.panes.len(), 1);
+        assert_glyph_only_surface_change(&plain, &surface);
+        assert_eq!(surface_corner(&plain, 0), "┌");
+        assert_eq!(surface_corner(&surface, 0), "┏");
+    }
 }

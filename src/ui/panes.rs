@@ -576,6 +576,14 @@ fn render_pane_borders(
         add_pane_border_cells(&mut cells, info);
     }
     add_split_border_cells(app.pane_gaps, split_borders, &mut cells);
+    let focus_frame = if app.pane_focus_weight {
+        pane_infos
+            .iter()
+            .find(|info| info.is_focused)
+            .and_then(|info| FocusFrame::of(info, app.pane_gaps))
+    } else {
+        None
+    };
 
     let buf = frame.buffer_mut();
     let area = buf.area;
@@ -590,7 +598,12 @@ fn render_pane_borders(
         let focused = pane_infos
             .iter()
             .any(|info| info.is_focused && line_touches_pane(x, y, info, app.pane_gaps));
-        let symbol = line_cell_symbol(line);
+        let symbol = match focus_frame {
+            Some(focus_frame) => {
+                weighted_line_cell_symbol(line, focus_frame.arm_weights(x, y, LineWeight::Heavy))
+            }
+            None => line_cell_symbol(line),
+        };
         if symbol.is_empty() {
             continue;
         }
@@ -800,6 +813,123 @@ fn line_cell_symbol(line: LineCell) -> &'static str {
         (true, false, true, false) => "┘",
         _ => "",
     }
+}
+
+/// Glyph family of one border arm. Arms of a cell may differ; Unicode box
+/// drawing has a glyph for every light/heavy combination.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum LineWeight {
+    #[default]
+    Light,
+    Heavy,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct LineWeights {
+    up: LineWeight,
+    down: LineWeight,
+    left: LineWeight,
+    right: LineWeight,
+}
+
+/// Border rectangle owned by the focused pane: its own frame plus, without
+/// pane gaps, the shared divider column/row it touches to the right and below
+/// (the same cells `line_touches_pane` accents).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FocusFrame {
+    left: u16,
+    top: u16,
+    right: u16,
+    bottom: u16,
+}
+
+impl FocusFrame {
+    fn of(info: &PaneInfo, pane_gaps: bool) -> Option<Self> {
+        let rect = info.rect;
+        if rect.width == 0 || rect.height == 0 {
+            return None;
+        }
+        let shared_right = rect.x.saturating_add(rect.width);
+        let shared_bottom = rect.y.saturating_add(rect.height);
+        let own_right = pane_gaps || info.borders.contains(Borders::RIGHT);
+        let own_bottom = pane_gaps || info.borders.contains(Borders::BOTTOM);
+        Some(Self {
+            left: rect.x,
+            top: rect.y,
+            right: if own_right {
+                shared_right.saturating_sub(1)
+            } else {
+                shared_right
+            },
+            bottom: if own_bottom {
+                shared_bottom.saturating_sub(1)
+            } else {
+                shared_bottom
+            },
+        })
+    }
+
+    /// Whether the segment from `(x, y)` to `(x + 1, y)` lies on this frame.
+    fn owns_horizontal(&self, x: u16, y: u16) -> bool {
+        (y == self.top || y == self.bottom) && x >= self.left && x < self.right
+    }
+
+    /// Whether the segment from `(x, y)` to `(x, y + 1)` lies on this frame.
+    fn owns_vertical(&self, x: u16, y: u16) -> bool {
+        (x == self.left || x == self.right) && y >= self.top && y < self.bottom
+    }
+
+    /// Both halves of a segment agree, so merged junctions stay connected.
+    fn arm_weights(&self, x: u16, y: u16, emphasis: LineWeight) -> LineWeights {
+        let weight = |owned: bool| {
+            if owned {
+                emphasis
+            } else {
+                LineWeight::Light
+            }
+        };
+        LineWeights {
+            up: weight(y.checked_sub(1).is_some_and(|y| self.owns_vertical(x, y))),
+            down: weight(self.owns_vertical(x, y)),
+            left: weight(x.checked_sub(1).is_some_and(|x| self.owns_horizontal(x, y))),
+            right: weight(self.owns_horizontal(x, y)),
+        }
+    }
+}
+
+/// Indexed by `[up * 3 + down][left * 3 + right]`, where each arm is
+/// 0 = absent, 1 = light, 2 = heavy.
+const WEIGHTED_LINE_SYMBOLS: [[&str; 9]; 9] = [
+    ["", "╶", "╺", "╴", "─", "╼", "╸", "╾", "━"],
+    ["╷", "┌", "┍", "┐", "┬", "┮", "┑", "┭", "┯"],
+    ["╻", "┎", "┏", "┒", "┰", "┲", "┓", "┱", "┳"],
+    ["╵", "└", "┕", "┘", "┴", "┶", "┙", "┵", "┷"],
+    ["│", "├", "┝", "┤", "┼", "┾", "┥", "┽", "┿"],
+    ["╽", "┟", "┢", "┧", "╁", "╆", "┪", "╅", "╈"],
+    ["╹", "┖", "┗", "┚", "┸", "┺", "┛", "┹", "┻"],
+    ["╿", "┞", "┡", "┦", "╀", "╄", "┩", "╃", "╇"],
+    ["┃", "┠", "┣", "┨", "╂", "╊", "┫", "╉", "╋"],
+];
+
+fn weighted_line_cell_symbol(line: LineCell, weights: LineWeights) -> &'static str {
+    let arm = |present: bool, weight: LineWeight| -> u8 {
+        match (present, weight) {
+            (false, _) => 0,
+            (true, LineWeight::Light) => 1,
+            (true, LineWeight::Heavy) => 2,
+        }
+    };
+    let mut up = arm(line.up, weights.up);
+    let mut down = arm(line.down, weights.down);
+    let mut left = arm(line.left, weights.left);
+    let mut right = arm(line.right, weights.right);
+    // Like `line_cell_symbol`, a lone arm draws a full straight line.
+    match (up, down, left, right) {
+        (lone, 0, 0, 0) | (0, lone, 0, 0) => (up, down) = (lone, lone),
+        (0, 0, lone, 0) | (0, 0, 0, lone) => (left, right) = (lone, lone),
+        _ => {}
+    }
+    WEIGHTED_LINE_SYMBOLS[usize::from(up * 3 + down)][usize::from(left * 3 + right)]
 }
 
 pub(crate) fn render_selection_highlight<P: PartialEq>(
@@ -1779,5 +1909,460 @@ mod tests {
                 fallback
             );
         }
+    }
+
+    fn weighted_arms(symbol: &str) -> Option<[u8; 4]> {
+        let index = WEIGHTED_LINE_SYMBOLS
+            .iter()
+            .flatten()
+            .position(|candidate| !candidate.is_empty() && *candidate == symbol)?;
+        let index = u8::try_from(index).ok()?;
+        Some([index / 27, index / 9 % 3, index / 3 % 3, index % 3])
+    }
+
+    fn has_heavy_arm(symbol: &str) -> bool {
+        weighted_arms(symbol).is_some_and(|arms| arms.contains(&2))
+    }
+
+    fn buffer_rows(buffer: &Buffer) -> Vec<String> {
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    /// Top-left, top-right, bottom-left, bottom-right.
+    fn focus_weight_grid() -> (Workspace, [PaneId; 4]) {
+        let mut workspace = Workspace::test_new("test");
+        let top_left = workspace.tabs[0].root_pane;
+        let top_right = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        workspace.tabs[0].layout.focus_pane(top_left);
+        let bottom_left = workspace.test_split(ratatui::layout::Direction::Vertical);
+        workspace.tabs[0].layout.focus_pane(top_right);
+        let bottom_right = workspace.test_split(ratatui::layout::Direction::Vertical);
+        (workspace, [top_left, top_right, bottom_left, bottom_right])
+    }
+
+    fn focus_weight_app(
+        pane_borders: PaneBordersConfig,
+        pane_gaps: bool,
+        pane_outer_borders: bool,
+    ) -> AppState {
+        let mut app = AppState::test_new();
+        app.pane_borders = pane_borders;
+        app.pane_gaps = pane_gaps;
+        app.pane_outer_borders = pane_outer_borders;
+        app
+    }
+
+    fn render_layout_borders(app: &AppState, workspace: &Workspace, area: Rect) -> Buffer {
+        let layout = &workspace.tabs[0].layout;
+        let infos = apply_pane_chrome(
+            layout.panes(area),
+            app.pane_borders,
+            app.pane_gaps,
+            app.pane_outer_borders,
+        );
+        let splits = layout.splits(area);
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(area.width, area.height))
+                .unwrap();
+        terminal
+            .draw(|frame| render_pane_borders(app, workspace, &infos, &splits, frame))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    /// Renders the same layout with the option off and on.
+    fn render_focus_weight_pair(
+        app: &mut AppState,
+        workspace: &Workspace,
+        area: Rect,
+    ) -> (Buffer, Buffer) {
+        app.pane_focus_weight = false;
+        let plain = render_layout_borders(app, workspace, area);
+        app.pane_focus_weight = true;
+        let emphasized = render_layout_borders(app, workspace, area);
+        (plain, emphasized)
+    }
+
+    /// Asserts the emphasized buffer differs from the plain one only by glyph
+    /// weight on accented cells, then returns the cells holding a heavy arm.
+    fn assert_weight_only_changes(
+        app: &AppState,
+        plain: &Buffer,
+        emphasized: &Buffer,
+    ) -> Vec<(u16, u16)> {
+        assert_eq!(plain.area, emphasized.area);
+        let mut heavy = Vec::new();
+        for y in 0..plain.area.height {
+            for x in 0..plain.area.width {
+                let (before, after) = (&plain[(x, y)], &emphasized[(x, y)]);
+                assert_eq!(before.style(), after.style(), "style changed at ({x}, {y})");
+                assert!(!has_heavy_arm(before.symbol()), "plain heavy at ({x}, {y})");
+                if before.symbol() != after.symbol() {
+                    let arms_before = weighted_arms(before.symbol()).map(|a| a.map(|w| w > 0));
+                    let arms_after = weighted_arms(after.symbol()).map(|a| a.map(|w| w > 0));
+                    assert!(arms_before.is_some(), "non-line cell changed at ({x}, {y})");
+                    assert_eq!(arms_before, arms_after, "arms changed at ({x}, {y})");
+                }
+                if has_heavy_arm(after.symbol()) {
+                    assert_eq!(
+                        after.style().fg,
+                        Some(app.palette.accent),
+                        "unaccented heavy at ({x}, {y})"
+                    );
+                    heavy.push((x, y));
+                }
+            }
+        }
+        heavy
+    }
+
+    fn accented_line_cells(app: &AppState, buffer: &Buffer) -> Vec<(u16, u16)> {
+        let mut cells = Vec::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                let cell = &buffer[(x, y)];
+                if weighted_arms(cell.symbol()).is_some()
+                    && cell.style().fg == Some(app.palette.accent)
+                {
+                    cells.push((x, y));
+                }
+            }
+        }
+        cells
+    }
+
+    #[test]
+    fn pane_focus_weight_glyph_table_matches_light_family_and_covers_heavy_mixes() {
+        let heavy = LineWeights {
+            up: LineWeight::Heavy,
+            down: LineWeight::Heavy,
+            left: LineWeight::Heavy,
+            right: LineWeight::Heavy,
+        };
+        for bits in 0..16u8 {
+            let line = LineCell {
+                up: bits & 8 != 0,
+                down: bits & 4 != 0,
+                left: bits & 2 != 0,
+                right: bits & 1 != 0,
+            };
+            assert_eq!(
+                weighted_line_cell_symbol(line, LineWeights::default()),
+                line_cell_symbol(line)
+            );
+            let heavy_symbol = weighted_line_cell_symbol(line, heavy);
+            let light_arms = weighted_arms(line_cell_symbol(line));
+            assert_eq!(
+                weighted_arms(heavy_symbol),
+                light_arms.map(|arms| arms.map(|weight| weight * 2))
+            );
+        }
+        let mut glyphs: Vec<&str> = WEIGHTED_LINE_SYMBOLS.iter().flatten().copied().collect();
+        assert_eq!(glyphs.remove(0), "");
+        glyphs.sort_unstable();
+        glyphs.dedup();
+        assert_eq!(glyphs.len(), 80);
+        assert_eq!(
+            weighted_line_cell_symbol(
+                LineCell {
+                    up: true,
+                    down: true,
+                    left: false,
+                    right: true,
+                },
+                LineWeights {
+                    right: LineWeight::Heavy,
+                    ..LineWeights::default()
+                },
+            ),
+            "┝"
+        );
+        assert_eq!(
+            weighted_line_cell_symbol(
+                LineCell {
+                    up: true,
+                    down: false,
+                    left: false,
+                    right: false,
+                },
+                LineWeights {
+                    up: LineWeight::Heavy,
+                    ..LineWeights::default()
+                },
+            ),
+            "┃"
+        );
+    }
+
+    #[test]
+    fn pane_border_glyphs_characterize_shared_and_gapped_grids() {
+        let (workspace, _) = focus_weight_grid();
+        let area = Rect::new(0, 0, 12, 6);
+        let shared = render_layout_borders(
+            &focus_weight_app(PaneBordersConfig::Auto, false, true),
+            &workspace,
+            area,
+        );
+        assert_eq!(
+            buffer_rows(&shared),
+            vec![
+                "┌─────┬────┐",
+                "│     │    │",
+                "│     │    │",
+                "├─────┼────┤",
+                "│     │    │",
+                "└─────┴────┘",
+            ]
+        );
+        let gapped = render_layout_borders(
+            &focus_weight_app(PaneBordersConfig::Auto, true, true),
+            &workspace,
+            area,
+        );
+        assert_eq!(
+            buffer_rows(&gapped),
+            vec![
+                "┌────┐┌────┐",
+                "│    ││    │",
+                "└────┘└────┘",
+                "┌────┐┌────┐",
+                "│    ││    │",
+                "└────┘└────┘",
+            ]
+        );
+    }
+
+    #[test]
+    fn pane_focus_weight_disabled_matches_baseline_buffers() {
+        let (mut workspace, panes) = focus_weight_grid();
+        for focused in panes {
+            workspace.tabs[0].layout.focus_pane(focused);
+            for (gaps, outer) in [(false, true), (false, false), (true, true), (true, false)] {
+                let area = Rect::new(0, 0, 12, 6);
+                let mut app = focus_weight_app(PaneBordersConfig::Auto, gaps, outer);
+                assert!(!app.pane_focus_weight, "unset defaults to off");
+                let unset = render_layout_borders(&app, &workspace, area);
+                app.pane_focus_weight = false;
+                let explicit = render_layout_borders(&app, &workspace, area);
+                assert_eq!(unset, explicit);
+                for y in 0..area.height {
+                    for x in 0..area.width {
+                        assert!(!has_heavy_arm(unset[(x, y)].symbol()));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pane_focus_weight_shared_grid_marks_focused_frame_and_keeps_arms() {
+        let (mut workspace, [top_left, _, _, bottom_right]) = focus_weight_grid();
+        let area = Rect::new(0, 0, 12, 6);
+        let mut app = focus_weight_app(PaneBordersConfig::Auto, false, true);
+
+        workspace.tabs[0].layout.focus_pane(top_left);
+        let (plain, emphasized) = render_focus_weight_pair(&mut app, &workspace, area);
+        assert_eq!(
+            buffer_rows(&emphasized),
+            vec![
+                "┏━━━━━┱────┐",
+                "┃     ┃    │",
+                "┃     ┃    │",
+                "┡━━━━━╃────┤",
+                "│     │    │",
+                "└─────┴────┘",
+            ]
+        );
+        let heavy = assert_weight_only_changes(&app, &plain, &emphasized);
+        assert_eq!(heavy, accented_line_cells(&app, &emphasized));
+
+        // Moving focus moves the cue; the previous frame returns to light.
+        workspace.tabs[0].layout.focus_pane(bottom_right);
+        let (plain, emphasized) = render_focus_weight_pair(&mut app, &workspace, area);
+        assert_eq!(
+            buffer_rows(&emphasized),
+            vec![
+                "┌─────┬────┐",
+                "│     │    │",
+                "│     │    │",
+                "├─────╆━━━━┪",
+                "│     ┃    ┃",
+                "└─────┺━━━━┛",
+            ]
+        );
+        let heavy = assert_weight_only_changes(&app, &plain, &emphasized);
+        assert_eq!(heavy, accented_line_cells(&app, &emphasized));
+    }
+
+    #[test]
+    fn pane_focus_weight_every_focus_keeps_arms_and_colors_in_both_themes() {
+        let (mut workspace, panes) = focus_weight_grid();
+        for palette in [Palette::catppuccin(), Palette::catppuccin_latte()] {
+            for focused in panes {
+                workspace.tabs[0].layout.focus_pane(focused);
+                for (gaps, outer) in [(false, true), (false, false), (true, true), (true, false)] {
+                    for area in [Rect::new(0, 0, 12, 6), Rect::new(0, 0, 40, 12)] {
+                        let mut app = focus_weight_app(PaneBordersConfig::Auto, gaps, outer);
+                        app.palette = palette.clone();
+                        let (plain, emphasized) =
+                            render_focus_weight_pair(&mut app, &workspace, area);
+                        let heavy = assert_weight_only_changes(&app, &plain, &emphasized);
+                        assert!(!heavy.is_empty());
+                        assert_eq!(
+                            heavy,
+                            accented_line_cells(&app, &emphasized),
+                            "gaps={gaps} outer={outer} area={area:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pane_focus_weight_gapped_frames_only_emphasize_focused_frame() {
+        let (mut workspace, [top_left, ..]) = focus_weight_grid();
+        workspace.tabs[0].layout.focus_pane(top_left);
+        let area = Rect::new(0, 0, 12, 6);
+
+        let mut app = focus_weight_app(PaneBordersConfig::Auto, true, true);
+        let (plain, emphasized) = render_focus_weight_pair(&mut app, &workspace, area);
+        assert_eq!(
+            buffer_rows(&emphasized),
+            vec![
+                "┏━━━━┓┌────┐",
+                "┃    ┃│    │",
+                "┗━━━━┛└────┘",
+                "┌────┐┌────┐",
+                "│    ││    │",
+                "└────┘└────┘",
+            ]
+        );
+        assert_weight_only_changes(&app, &plain, &emphasized);
+
+        let mut app = focus_weight_app(PaneBordersConfig::Auto, true, false);
+        let (plain, emphasized) = render_focus_weight_pair(&mut app, &workspace, area);
+        assert_eq!(
+            buffer_rows(&emphasized),
+            vec![
+                "     ┃│     ",
+                "     ┃│     ",
+                "━━━━━┛└─────",
+                "─────┐┌─────",
+                "     ││     ",
+                "     ││     ",
+            ]
+        );
+        assert_weight_only_changes(&app, &plain, &emphasized);
+    }
+
+    #[test]
+    fn pane_focus_weight_without_outer_borders_keeps_divider_arms() {
+        let (mut workspace, [top_left, ..]) = focus_weight_grid();
+        workspace.tabs[0].layout.focus_pane(top_left);
+        let area = Rect::new(0, 0, 12, 6);
+        let mut app = focus_weight_app(PaneBordersConfig::Auto, false, false);
+        let (plain, emphasized) = render_focus_weight_pair(&mut app, &workspace, area);
+        assert_eq!(
+            buffer_rows(&plain),
+            vec![
+                "      │     ",
+                "      │     ",
+                "      │     ",
+                "──────┼─────",
+                "      │     ",
+                "      │     ",
+            ]
+        );
+        assert_eq!(
+            buffer_rows(&emphasized),
+            vec![
+                "      ┃     ",
+                "      ┃     ",
+                "      ┃     ",
+                "━━━━━━╃─────",
+                "      │     ",
+                "      │     ",
+            ]
+        );
+        let heavy = assert_weight_only_changes(&app, &plain, &emphasized);
+        assert_eq!(heavy, accented_line_cells(&app, &emphasized));
+    }
+
+    #[test]
+    fn pane_focus_weight_lone_and_narrow_panes() {
+        let lone = Workspace::test_new("test");
+        let area = Rect::new(0, 0, 6, 3);
+        let mut app = focus_weight_app(PaneBordersConfig::Always, false, true);
+        let (plain, emphasized) = render_focus_weight_pair(&mut app, &lone, area);
+        assert_eq!(buffer_rows(&emphasized), vec!["┏━━━━┓", "┃    ┃", "┗━━━━┛"]);
+        assert_weight_only_changes(&app, &plain, &emphasized);
+
+        let (mut workspace, panes) = focus_weight_grid();
+        for focused in panes {
+            workspace.tabs[0].layout.focus_pane(focused);
+            for (gaps, outer) in [(false, true), (false, false), (true, true), (true, false)] {
+                for area in [
+                    Rect::new(0, 0, 3, 3),
+                    Rect::new(0, 0, 4, 4),
+                    Rect::new(0, 0, 5, 3),
+                ] {
+                    let mut app = focus_weight_app(PaneBordersConfig::Auto, gaps, outer);
+                    let (plain, emphasized) = render_focus_weight_pair(&mut app, &workspace, area);
+                    // Heavy arms stay on accented cells and arms never change,
+                    // even where tiny frames leave no unshared perimeter.
+                    let heavy = assert_weight_only_changes(&app, &plain, &emphasized);
+                    let accented = accented_line_cells(&app, &emphasized);
+                    if heavy != accented {
+                        // Limitation: a focused frame one cell wide or tall has
+                        // no segment to thicken; only its color marks focus.
+                        let rect = workspace.tabs[0]
+                            .layout
+                            .panes(area)
+                            .into_iter()
+                            .find(|info| info.id == focused)
+                            .unwrap()
+                            .rect;
+                        assert!(rect.width <= 1 || rect.height <= 1, "{area:?} {rect:?}");
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pane_focus_weight_keeps_focused_title_text_and_bold() {
+        let mut workspace = Workspace::test_new("test");
+        let left = workspace.tabs[0].root_pane;
+        workspace.test_split(ratatui::layout::Direction::Horizontal);
+        workspace.tabs[0].layout.focus_pane(left);
+        let mut app = focus_weight_app(PaneBordersConfig::Auto, false, true);
+        let terminal_id = workspace.tabs[0].panes[&left].attached_terminal_id.clone();
+        let mut terminal_state = TerminalState::new(terminal_id.clone(), "/tmp".into());
+        terminal_state.set_manual_label("api".into());
+        app.terminals.insert(terminal_id, terminal_state);
+        let area = Rect::new(0, 0, 20, 4);
+
+        let (plain, emphasized) = render_focus_weight_pair(&mut app, &workspace, area);
+        assert_eq!(
+            buffer_rows(&emphasized),
+            vec![
+                "┏ api ━━━━┱────────┐",
+                "┃         ┃        │",
+                "┃         ┃        │",
+                "┗━━━━━━━━━┹────────┘",
+            ]
+        );
+        assert_weight_only_changes(&app, &plain, &emphasized);
+        let title = &emphasized[(2, 0)];
+        assert_eq!(title.symbol(), "a");
+        assert_eq!(title.style().fg, Some(app.palette.accent));
+        assert!(title.style().add_modifier.contains(Modifier::BOLD));
     }
 }

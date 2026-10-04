@@ -336,6 +336,8 @@ The sidebar is the main Herdr dashboard. Search `ui.` in the [Config reference](
 
 Set `rounded_borders = true` under `[ui]` to round light corners on existing pane, popup, menu, dialog and toast frames. The default is `false`, which preserves existing appearance. This client-local preference reloads without changing terminal dimensions, padding, hit targets or border visibility. Shared T/cross junctions and double/heavy corners remain square; terminal application content is not restyled.
 
+Set `pane_focus_weight = true` under `[ui]` to draw the focused pane's border with heavy line glyphs in addition to its accent color, so focus is recognizable without relying on color. The default is `false`, which keeps the existing appearance. Shared dividers stay shared: the segments along the focused pane become heavy and junctions keep every arm. Pane sizes, dividers and click targets do not change. The cue needs visible borders; it has no effect with `pane_borders = "off"`.
+
 Set `tab_bar_position = "bottom"` under `[ui]` to place the desktop tab row below the terminal panes. Prefix, Navigate, Copy, and Resize mode bars temporarily replace the bottom tab row while active. The default is `"top"`.
 
 Configure an ordered tmux-style status area at the right edge of the tab row:
