@@ -326,3 +326,47 @@ async fn popup_bg_respects_real_terminal_background_provenance() {
         );
     }
 }
+
+/// U1 x B1: the popup frame takes B1's rounded corners and U1's popup colors at
+/// once; with rounding off the popup differs only by its four corner glyphs.
+#[test]
+fn rounded_popup_frame_keeps_popup_border_and_background_colors() {
+    let colors = "[theme.custom]\npopup_bg = \"#102030\"\npopup_border = \"#a0b0c0\"\n";
+    let (frame, hit) = compose_popup(&config_from(&format!(
+        "[ui]\nrounded_borders = true\n{colors}"
+    )));
+    let bg = Color::Rgb(16, 32, 48);
+    let border = Color::Rgb(160, 176, 192);
+    assert_popup_colors(&frame, &hit, border, bg, bg);
+
+    let outer = hit.rect;
+    let corners = [
+        (outer.x, outer.y, "╭", "┌"),
+        (outer.right() - 1, outer.y, "╮", "┐"),
+        (outer.x, outer.bottom() - 1, "╰", "└"),
+        (outer.right() - 1, outer.bottom() - 1, "╯", "┘"),
+    ];
+    for (x, y, arc, _) in corners {
+        let corner = cell(&frame, x, y);
+        assert_eq!(corner.symbol, arc, "corner {x},{y}");
+        assert_eq!(corner.fg, color_to_u32(border), "corner fg {x},{y}");
+        assert_eq!(corner.bg, color_to_u32(bg), "corner bg {x},{y}");
+    }
+
+    let (square, square_hit) = compose_popup(&config_from(colors));
+    assert_eq!(square_hit.rect, hit.rect);
+    assert_eq!(square_hit.inner_rect, hit.inner_rect);
+    assert_popup_colors(&square, &square_hit, border, bg, bg);
+    for y in outer.y..outer.bottom() {
+        for x in outer.x..outer.right() {
+            let mut expected = cell(&square, x, y).clone();
+            if let Some((_, _, arc, plain)) =
+                corners.iter().find(|(cx, cy, _, _)| (*cx, *cy) == (x, y))
+            {
+                assert_eq!(expected.symbol, *plain, "square corner {x},{y}");
+                expected.symbol = (*arc).into();
+            }
+            assert_eq!(cell(&frame, x, y), &expected, "popup cell {x},{y}");
+        }
+    }
+}
