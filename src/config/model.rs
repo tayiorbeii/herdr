@@ -1001,6 +1001,59 @@ impl<'de> Deserialize<'de> for SidebarPaddingCells {
     }
 }
 
+/// `ui.inactive_pane_dim_percent`, parsed per field so a malformed value disables only
+/// inactive pane dimming instead of rejecting the whole `[ui]` section. `Err` keeps the
+/// rejected TOML value for the diagnostic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InactivePaneDimPercentConfig(Result<u8, String>);
+
+impl Default for InactivePaneDimPercentConfig {
+    fn default() -> Self {
+        Self(Ok(0))
+    }
+}
+
+impl<'de> Deserialize<'de> for InactivePaneDimPercentConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = toml::Value::deserialize(deserializer)?;
+        Ok(Self(match value {
+            toml::Value::Integer(percent @ 0..=100) => Ok(percent as u8),
+            other => Err(other.to_string()),
+        }))
+    }
+}
+
+/// `ui.inactive_pane_dim_exclude_processes`, parsed per field like the percent. `Err` keeps
+/// the rejected TOML value for the diagnostic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InactivePaneDimExcludeProcessesConfig(Result<Vec<String>, String>);
+
+impl Default for InactivePaneDimExcludeProcessesConfig {
+    fn default() -> Self {
+        Self(Ok(Vec::new()))
+    }
+}
+
+impl<'de> Deserialize<'de> for InactivePaneDimExcludeProcessesConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = toml::Value::deserialize(deserializer)?;
+        let names = match &value {
+            toml::Value::Array(items) => items
+                .iter()
+                .map(|item| item.as_str().map(str::to_owned))
+                .collect::<Option<Vec<_>>>(),
+            _ => None,
+        };
+        Ok(Self(names.ok_or_else(|| value.to_string())))
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct UiConfig {
@@ -1060,6 +1113,12 @@ pub struct UiConfig {
     /// Empty terminal cells kept on each side between a pane's frame (or edge)
     /// and its terminal content. Shrinks so the PTY keeps its minimum size. Default: 0.
     pub pane_padding_cells: PanePaddingCellsConfig,
+    /// Blend the text of unfocused panes toward their background by this percent, 0..=100,
+    /// in terminal mode only. Default: 0 (off).
+    pub inactive_pane_dim_percent: InactivePaneDimPercentConfig,
+    /// Foreground-process basenames whose panes are never dimmed. Accepted but not applied yet:
+    /// the client has no trustworthy foreground-process name. Default: empty.
+    pub inactive_pane_dim_exclude_processes: InactivePaneDimExcludeProcessesConfig,
     /// Show agent labels in split pane borders when no manual pane label is set. Default: false.
     pub show_agent_labels_on_pane_borders: bool,
     /// Compose pane border titles from one agent sidebar token row. Absent keeps the plain title.
@@ -1309,6 +1368,8 @@ impl Default for UiConfig {
             pane_heavy_borders: false,
             pane_gap_cells: None,
             pane_padding_cells: PanePaddingCellsConfig::default(),
+            inactive_pane_dim_percent: InactivePaneDimPercentConfig::default(),
+            inactive_pane_dim_exclude_processes: InactivePaneDimExcludeProcessesConfig::default(),
             show_agent_labels_on_pane_borders: false,
             pane_title_tokens: None,
             pane_manual_label_first: false,
@@ -1366,6 +1427,40 @@ impl UiConfig {
                 "ui.pane_padding_cells = {value} is not a whole number of cells from 0 to 65535; disabling pane padding"
             )
         })
+    }
+
+    /// Effective inactive pane dim percent; a malformed setting disables dimming.
+    pub fn inactive_pane_dim_percent(&self) -> u8 {
+        *self.inactive_pane_dim_percent.0.as_ref().unwrap_or(&0)
+    }
+
+    /// Configured exclude list; a malformed setting is ignored. Not consulted by rendering yet:
+    /// the client has no trustworthy foreground-process name to match against.
+    #[cfg(test)]
+    pub fn inactive_pane_dim_exclude_processes(&self) -> &[String] {
+        self.inactive_pane_dim_exclude_processes
+            .0
+            .as_deref()
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn inactive_pane_dim_diagnostics(&self) -> impl Iterator<Item = String> + '_ {
+        let percent = self.inactive_pane_dim_percent.0.as_ref().err().map(|value| {
+            format!(
+                "ui.inactive_pane_dim_percent = {value} is not a whole percent from 0 to 100; disabling inactive pane dimming"
+            )
+        });
+        let exclude = self
+            .inactive_pane_dim_exclude_processes
+            .0
+            .as_ref()
+            .err()
+            .map(|value| {
+                format!(
+                    "ui.inactive_pane_dim_exclude_processes = {value} is not a list of process names; ignoring it"
+                )
+            });
+        percent.into_iter().chain(exclude)
     }
 }
 
@@ -1732,6 +1827,93 @@ status_indicators = "symbols"
                 config.collect_diagnostics().contains(&diagnostic),
                 "{raw}: startup diagnostics omit the field"
             );
+        }
+    }
+
+    #[test]
+    fn inactive_pane_dim_percent_defaults_to_zero_and_parses_range() {
+        let default_config = Config::default();
+        assert_eq!(default_config.ui.inactive_pane_dim_percent(), 0);
+        assert!(default_config
+            .ui
+            .inactive_pane_dim_exclude_processes()
+            .is_empty());
+        assert_eq!(default_config.ui.inactive_pane_dim_diagnostics().count(), 0);
+
+        for (raw, expected) in [("0", 0), ("35", 35), ("100", 100)] {
+            let config: Config =
+                toml::from_str(&format!("[ui]\ninactive_pane_dim_percent = {raw}")).unwrap();
+            assert_eq!(config.ui.inactive_pane_dim_percent(), expected, "{raw}");
+            assert!(config.collect_diagnostics().is_empty(), "{raw}");
+        }
+    }
+
+    #[test]
+    fn inactive_pane_dim_percent_malformed_value_disables_only_dimming() {
+        for raw in [
+            "-1",
+            "101",
+            "1.5",
+            "\"30\"",
+            "true",
+            "[30]",
+            "{ percent = 30 }",
+        ] {
+            let config: Config = toml::from_str(&format!(
+                "[ui]\ninactive_pane_dim_percent = {raw}\npane_gaps = false\npane_scrollbars = false\n"
+            ))
+            .unwrap_or_else(|err| panic!("{raw} rejected the whole config: {err}"));
+            assert_eq!(config.ui.inactive_pane_dim_percent(), 0, "{raw}");
+            assert!(!config.ui.pane_gaps, "{raw}: sibling key dropped");
+            assert!(!config.ui.pane_scrollbars, "{raw}: sibling key dropped");
+            let expected = format!(
+                "ui.inactive_pane_dim_percent = {raw} is not a whole percent from 0 to 100; disabling inactive pane dimming"
+            );
+            assert_eq!(
+                config
+                    .ui
+                    .inactive_pane_dim_diagnostics()
+                    .collect::<Vec<_>>(),
+                vec![expected.clone()],
+                "{raw}"
+            );
+            assert!(
+                config.collect_diagnostics().contains(&expected),
+                "{raw}: startup diagnostics omit the field"
+            );
+        }
+    }
+
+    #[test]
+    fn inactive_pane_dim_exclude_processes_parses_and_reports_malformed_values() {
+        let config: Config = toml::from_str(
+            "[ui]\ninactive_pane_dim_percent = 40\ninactive_pane_dim_exclude_processes = [\"vim\", \"less\"]\n",
+        )
+        .unwrap();
+        assert_eq!(
+            config.ui.inactive_pane_dim_exclude_processes(),
+            ["vim".to_string(), "less".to_string()]
+        );
+        assert_eq!(config.ui.inactive_pane_dim_percent(), 40);
+        assert!(
+            config.collect_diagnostics().is_empty(),
+            "a valid list is accepted without a banner"
+        );
+
+        for raw in ["\"vim\"", "[\"vim\", 1]", "3", "{ name = \"vim\" }"] {
+            let config: Config = toml::from_str(&format!(
+                "[ui]\ninactive_pane_dim_exclude_processes = {raw}\ninactive_pane_dim_percent = 25\n"
+            ))
+            .unwrap_or_else(|err| panic!("{raw} rejected the whole config: {err}"));
+            assert!(
+                config.ui.inactive_pane_dim_exclude_processes().is_empty(),
+                "{raw}"
+            );
+            assert_eq!(config.ui.inactive_pane_dim_percent(), 25, "{raw}");
+            let expected = format!(
+                "ui.inactive_pane_dim_exclude_processes = {raw} is not a list of process names; ignoring it"
+            );
+            assert_eq!(config.collect_diagnostics(), vec![expected], "{raw}");
         }
     }
 

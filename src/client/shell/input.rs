@@ -290,10 +290,25 @@ impl ClientShellState {
                         }
                     }
                 }
-                RawInputEvent::HostDefaultColor { .. }
-                | RawInputEvent::HostPaletteColors { .. }
-                | RawInputEvent::HostCellSizeReport { .. }
-                | RawInputEvent::Unsupported => {}
+                RawInputEvent::HostDefaultColor {
+                    kind: crate::terminal_theme::DefaultColorKind::Foreground,
+                    color,
+                } => {
+                    if self.host_foreground != Some(color) {
+                        self.host_foreground = Some(color);
+                        outcome.repaint |= self.config.inactive_pane_dim_percent > 0;
+                    }
+                }
+                RawInputEvent::HostPaletteColors { colors } => {
+                    for (index, color) in colors {
+                        let entry = &mut self.host_palette[usize::from(index)];
+                        if *entry != Some(color) {
+                            *entry = Some(color);
+                            outcome.repaint |= self.config.inactive_pane_dim_percent > 0;
+                        }
+                    }
+                }
+                RawInputEvent::HostCellSizeReport { .. } | RawInputEvent::Unsupported => {}
             }
             self.reconcile_input_source();
         }

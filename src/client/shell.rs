@@ -20,6 +20,7 @@ mod endpoints;
 pub(super) use endpoints::*;
 mod global_menu;
 mod graphics;
+mod inactive_dim;
 mod input;
 mod input_source;
 mod link_hover;
