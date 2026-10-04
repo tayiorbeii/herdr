@@ -273,6 +273,8 @@ dark_name = "catppuccin"
 [theme.custom]
 active_tab_fg = "#181825"
 active_tab_bg = "#89b4fa"
+pane_border_active = "#89b4fa"
+pane_border_inactive = "#6c7086"
 sidebar_bg = "#181825"
 active_row_bg = "#1e1e2e"
 selection_bg = "#313244"
@@ -288,6 +290,8 @@ yellow = "#f9e2af"
 
 `active_tab_fg` 和 `active_tab_bg` 可独立更改已聚焦标签页标签的前景色与背景色，不影响非活动标签页或状态段。省略时，前景色跟随解析后的 `panel_bg`（当 `panel_bg` 为重置值时使用 `surface_dim`），背景色跟随解析后的 `accent`。重置别名明确使用终端默认色，而不是继承。自定义标签保留原有粗体，标签栏的显示条件也不会改变。
 
+`pane_border_active` 和 `pane_border_inactive` 仅更改已聚焦和未聚焦窗格的边框及窗格边框标题颜色，不影响标签页、弹出窗口、浮层、侧边栏或其他使用 `accent` 的位置。省略时，已聚焦窗格跟随解析后的 `accent`，未聚焦窗格跟随解析后的 `overlay0`，因此现有的 `accent` 和 `overlay0` 覆盖仍然生效。重置别名明确使用终端默认前景色，而不是继承。将两者设为相同值会有意消除已聚焦与未聚焦窗格之间的颜色差异；已聚焦窗格的标题仍保持粗体。模式子表中省略的字段继承 `[theme.custom]`，且仅在启用 `auto_switch` 时生效。实时重载配置即可应用更改，移除覆盖会恢复默认色。
+
 颜色值支持十六进制（`#rgb` 或 `#rrggbb`）、命名颜色、`rgb(r,g,b)`，以及 `reset`、`default`、`none`、`transparent` 等重置别名。
 
 启用 `auto_switch` 后，可以通过明暗模式子表在共享自定义颜色之上应用不同的覆盖值：
@@ -299,12 +303,14 @@ accent = "#89b4fa"
 [theme.custom.light]
 active_tab_fg = "#eff1f5"
 active_tab_bg = "#1e66f5"
+pane_border_active = "#1e66f5"
 panel_bg = "#eff1f5"
 text = "#4c4f69"
 
 [theme.custom.dark]
 active_tab_fg = "#181825"
 active_tab_bg = "#89b4fa"
+pane_border_active = "#89b4fa"
 panel_bg = "#1e1e2e"
 text = "#cdd6f4"
 ```

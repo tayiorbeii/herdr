@@ -77,6 +77,18 @@
           "description": "Set only the focused tab label background. When unset, follows the resolved accent. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default, not inheritance."
         },
         {
+          "key": "theme.custom.pane_border_active",
+          "type": "color",
+          "default": "unset",
+          "description": "Set only the focused pane frame and pane border title color. When unset, follows the resolved accent. Tabs, popups and other accent uses are unchanged. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default foreground, not inheritance."
+        },
+        {
+          "key": "theme.custom.pane_border_inactive",
+          "type": "color",
+          "default": "unset",
+          "description": "Set only the unfocused pane frame and pane border title color. When unset, follows the resolved overlay0. Matching pane_border_active removes the color-only focus difference; the focused title stays bold. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default foreground, not inheritance."
+        },
+        {
           "key": "theme.custom.panel_bg",
           "type": "color",
           "default": "unset",
@@ -203,6 +215,18 @@
           "description": "Override the focused tab label background only when auto_switch selects a light appearance. Omission inherits theme.custom.active_tab_bg, or the resolved accent if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset is explicit, not inheritance."
         },
         {
+          "key": "theme.custom.light.pane_border_active",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the focused pane frame and title color only when auto_switch selects a light appearance. Omission inherits theme.custom.pane_border_active, or the resolved accent if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default foreground, not inheritance."
+        },
+        {
+          "key": "theme.custom.light.pane_border_inactive",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the unfocused pane frame and title color only when auto_switch selects a light appearance. Omission inherits theme.custom.pane_border_inactive, or the resolved overlay0 if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default foreground, not inheritance."
+        },
+        {
           "key": "theme.custom.light.panel_bg",
           "type": "color",
           "default": "unset",
@@ -327,6 +351,18 @@
           "type": "color",
           "default": "unset",
           "description": "Override the focused tab label background only when auto_switch selects a dark appearance. Omission inherits theme.custom.active_tab_bg, or the resolved accent if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset is explicit, not inheritance."
+        },
+        {
+          "key": "theme.custom.dark.pane_border_active",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the focused pane frame and title color only when auto_switch selects a dark appearance. Omission inherits theme.custom.pane_border_active, or the resolved accent if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default foreground, not inheritance."
+        },
+        {
+          "key": "theme.custom.dark.pane_border_inactive",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the unfocused pane frame and title color only when auto_switch selects a dark appearance. Omission inherits theme.custom.pane_border_inactive, or the resolved overlay0 if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default foreground, not inheritance."
         },
         {
           "key": "theme.custom.dark.panel_bg",

@@ -63,6 +63,8 @@ everything lives at [herdr.dev/docs](https://herdr.dev/docs/): [quick start](htt
 
 Customize the focused tab label with optional `active_tab_fg` and `active_tab_bg` under `[theme.custom]` (or its `light`/`dark` subtables with `auto_switch`). Omitted colors keep the existing dynamic defaults; reset aliases explicitly use terminal defaults. See [configuration](https://herdr.dev/docs/configuration/).
 
+Customize pane frame and title focus colors with optional `pane_border_active` and `pane_border_inactive` under `[theme.custom]` (or its `light`/`dark` subtables with `auto_switch`). Omitted colors keep following `accent` and `overlay0`; reset aliases explicitly use the terminal default. See [configuration](https://herdr.dev/docs/configuration/).
+
 ## thanks
 
 every past sponsor and backer is listed in [SPONSORS.md](./SPONSORS.md) — thank you 🐑

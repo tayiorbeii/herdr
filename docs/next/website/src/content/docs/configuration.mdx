@@ -277,6 +277,8 @@ You can override individual colors:
 [theme.custom]
 active_tab_fg = "#181825"
 active_tab_bg = "#89b4fa"
+pane_border_active = "#89b4fa"
+pane_border_inactive = "#6c7086"
 sidebar_bg = "#181825"
 active_row_bg = "#1e1e2e"
 selection_bg = "#313244"
@@ -292,6 +294,8 @@ yellow = "#f9e2af"
 
 `active_tab_fg` and `active_tab_bg` independently change only the focused tab label, not inactive tabs or status segments. If omitted, the foreground follows the resolved `panel_bg` (`surface_dim` when `panel_bg` is reset), and the background follows the resolved `accent`. Reset aliases explicitly use terminal defaults; they do not mean inheritance. Custom labels keep their existing bold emphasis. These colors do not change tab bar visibility.
 
+`pane_border_active` and `pane_border_inactive` change only the pane frame and pane border title colors of the focused and unfocused panes. Tabs, popups, overlays, the sidebar and other `accent` uses are unchanged. If omitted, the focused pane follows the resolved `accent` and unfocused panes follow the resolved `overlay0`, so existing `accent` and `overlay0` overrides keep applying. Reset aliases explicitly use the terminal default foreground; they do not mean inheritance. Setting both to the same value deliberately removes the color difference between focused and unfocused panes; the focused pane title stays bold. Mode subtables inherit omitted fields from `[theme.custom]` and apply only with `auto_switch`. Live config reload applies the change, and removing an override restores the fallback.
+
 Color values accept hex (`#rgb` or `#rrggbb`), named colors, `rgb(r,g,b)`, or reset aliases like `reset`, `default`, `none`, and `transparent`.
 
 When `auto_switch` is enabled, optional light and dark subtables layer on top of the shared custom colors:
@@ -303,12 +307,14 @@ accent = "#89b4fa"
 [theme.custom.light]
 active_tab_fg = "#eff1f5"
 active_tab_bg = "#1e66f5"
+pane_border_active = "#1e66f5"
 panel_bg = "#eff1f5"
 text = "#4c4f69"
 
 [theme.custom.dark]
 active_tab_fg = "#181825"
 active_tab_bg = "#89b4fa"
+pane_border_active = "#89b4fa"
 panel_bg = "#1e1e2e"
 text = "#cdd6f4"
 ```
