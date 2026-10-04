@@ -247,3 +247,144 @@ async fn retained_scrollbar_first_appearance_with_padding_uses_complete_renderer
         shutdown_test_runtimes(&mut server);
     }
 }
+
+/// Two side-by-side panes with real runtimes at an arbitrary client size.
+fn split_spacing_server(
+    cols: u16,
+    rows: u16,
+    gap_cells: Option<u16>,
+    padding: u16,
+) -> (
+    HeadlessServer,
+    std::sync::mpsc::Receiver<Vec<u8>>,
+    std::sync::mpsc::Receiver<Vec<u8>>,
+) {
+    let mut server = test_headless_server();
+    let mut workspace = crate::workspace::Workspace::test_new("test");
+    let left = workspace.focused_pane_id().expect("focused pane");
+    let right = workspace.test_split(ratatui::layout::Direction::Horizontal);
+    for pane in [left, right] {
+        workspace.insert_test_runtime(
+            pane,
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(cols, rows, b"x"),
+        );
+    }
+    server.app.state.workspaces = vec![workspace];
+    server.app.state.active = Some(0);
+    server.app.state.selected = 0;
+    server.app.state.mode = crate::app::Mode::Terminal;
+    server.app.state.pane_gap_cells = gap_cells;
+    server.app.state.pane_padding_cells = padding;
+
+    let (client_tx, client_control_rx, client_rx) = test_client_writer();
+    server.clients.insert(
+        1,
+        ClientConnection::new(
+            (cols, rows),
+            crate::kitty_graphics::HostCellSize::default(),
+            1,
+            RenderEncoding::SemanticFrame,
+            Some(client_tx),
+        ),
+    );
+    server.foreground_client_id = Some(1);
+    server.sync_foreground_client_state();
+    assert!(server.claim_unowned_shell_tab_geometry(1, true));
+    (server, client_control_rx, client_rx)
+}
+
+/// S2-pane x S1: padding is applied inside each pane's allocation after the
+/// configured gap. Every PTY equals its published content rect, the published
+/// content rect stays inside the pane rect (the client derives pane hits and
+/// mouse origins from these two rects), and gap and padding cells stay blank.
+#[tokio::test]
+async fn pane_padding_applies_inside_pane_gap_cells_allocation() {
+    for (cols, rows) in [(80u16, 24u16), (24, 8), (16, 6), (12, 4)] {
+        let (mut unpadded_server, _unpadded_control_rx, unpadded_rx) =
+            split_spacing_server(cols, rows, Some(2), 0);
+        unpadded_server.render_and_stream();
+        receive(&unpadded_rx);
+        let baseline = unpadded_server.app.state.view.pane_infos.clone();
+        shutdown_test_runtimes(&mut unpadded_server);
+        let (mut server, _control_rx, render_rx) = split_spacing_server(cols, rows, Some(2), 1);
+        server.render_and_stream();
+        receive(&render_rx);
+        let surface = committed_surface(&server);
+        let infos = server.app.state.view.pane_infos.clone();
+        assert_eq!(surface.panes.len(), 2, "{cols}x{rows}");
+        assert_eq!(infos.len(), 2, "{cols}x{rows}");
+        for info in &infos {
+            let published = surface
+                .panes
+                .iter()
+                .find(|pane| pane.rect == info.rect.into())
+                .expect("published pane for view pane");
+            assert_eq!(
+                published.inner_rect,
+                info.inner_rect.into(),
+                "{cols}x{rows}"
+            );
+            // The PTY size floor applies only where the unpadded allocation is
+            // already below it (baseline tiny behavior); padding never causes it.
+            assert_eq!(
+                pty_size(&server, info.id),
+                (
+                    info.inner_rect.height.max(crate::pane::MIN_PTY_ROWS),
+                    info.inner_rect.width.max(crate::pane::MIN_PTY_COLS)
+                ),
+                "{cols}x{rows}: PTY must equal the published content rect"
+            );
+            let unpadded = baseline
+                .iter()
+                .find(|base| base.rect == info.rect)
+                .expect("padding never moves the pane allocation");
+            assert_eq!(
+                info.inner_rect,
+                crate::ui::pad_pane_content(unpadded.inner_rect, 1),
+                "{cols}x{rows}: padding insets the gap-adjusted content rect"
+            );
+            if unpadded.inner_rect.width >= crate::pane::MIN_PTY_COLS {
+                assert!(info.inner_rect.width >= crate::pane::MIN_PTY_COLS);
+            }
+            if unpadded.inner_rect.height >= crate::pane::MIN_PTY_ROWS {
+                assert!(info.inner_rect.height >= crate::pane::MIN_PTY_ROWS);
+            }
+            let inner = info.inner_rect;
+            let rect = info.rect;
+            assert!(inner.x >= rect.x && inner.y >= rect.y, "{cols}x{rows}");
+            assert!(inner.right() <= rect.right(), "{cols}x{rows}");
+            assert!(inner.bottom() <= rect.bottom(), "{cols}x{rows}");
+            assert!(inner.width >= 1 && inner.height >= 1, "{cols}x{rows}");
+        }
+        let mut rects: Vec<Rect> = infos.iter().map(|info| info.rect).collect();
+        rects.sort_by_key(|rect| rect.x);
+        let gap = rects[1].x - rects[0].right();
+        if (cols, rows) == (80, 24) {
+            assert_eq!(gap, 2, "full-size layout keeps the configured gap");
+            for info in &infos {
+                // One frame cell, then one padding cell, on every side.
+                assert_eq!(info.inner_rect.x, info.rect.x + 2);
+                assert_eq!(info.inner_rect.y, info.rect.y + 2);
+                assert!(info.inner_rect.bottom() + 2 <= info.rect.bottom());
+            }
+            for y in 0..rows {
+                for x in rects[0].right()..rects[1].x {
+                    assert_eq!(cell_symbol(&surface.frame, x, y), " ", "gap {x},{y}");
+                }
+            }
+            for info in &infos {
+                let pad_x = info.inner_rect.x - 1;
+                for y in info.inner_rect.y..info.inner_rect.bottom() {
+                    assert_eq!(
+                        cell_symbol(&surface.frame, pad_x, y),
+                        " ",
+                        "pad {pad_x},{y}"
+                    );
+                }
+            }
+        } else {
+            assert!(gap <= 2, "{cols}x{rows}: the gap only shrinks");
+        }
+        shutdown_test_runtimes(&mut server);
+    }
+}
