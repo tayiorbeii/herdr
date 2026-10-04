@@ -35,10 +35,23 @@ use crate::workspace::Workspace;
 pub struct Palette {
     /// Primary accent (highlight, active borders).
     pub accent: Color,
+    /// Focused tab overrides. None follows panel contrast/accent; Some(Reset) is explicit.
+    pub active_tab_fg: Option<Color>,
+    pub active_tab_bg: Option<Color>,
+    /// Pane frame and title focus overrides. None follows accent (focused) or overlay0
+    /// (unfocused) at render time; Some(Reset) is explicit.
+    pub pane_border_active: Option<Color>,
+    pub pane_border_inactive: Option<Color>,
+    /// Terminal popup overrides. None keeps panel_bg/accent chrome and verbatim PTY cells;
+    /// Some(Reset) is explicit.
+    pub popup_bg: Option<Color>,
+    pub popup_border: Option<Color>,
     /// Background for the tab bar, floating panels, overlays, and modals.
     pub panel_bg: Color,
     /// Optional desktop sidebar background. Reset preserves the terminal background.
     pub sidebar_bg: Color,
+    /// Optional default-background tint for unfocused panes. None keeps the baseline.
+    pub pane_inactive_bg: Option<Color>,
     /// Background for the active workspace and focused agent rows.
     pub active_row_bg: Color,
     /// Background for the Navigate-mode cursor row in the sidebar.
@@ -77,9 +90,16 @@ impl Palette {
     /// Catppuccin Mocha — the default.
     pub fn catppuccin() -> Self {
         Self {
+            active_tab_fg: None,
+            active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(137, 180, 250), // blue
             panel_bg: Color::Rgb(24, 24, 37),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(30, 30, 46),
             selection_bg: Color::Rgb(49, 50, 68),
             surface0: Color::Rgb(49, 50, 68),
@@ -102,9 +122,16 @@ impl Palette {
     /// Catppuccin Latte — the light Catppuccin flavor.
     pub fn catppuccin_latte() -> Self {
         Self {
+            active_tab_fg: None,
+            active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(30, 102, 245),
             panel_bg: Color::Rgb(239, 241, 245),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(230, 233, 239),
             selection_bg: Color::Rgb(189, 208, 245),
             surface0: Color::Rgb(204, 208, 218),
@@ -127,9 +154,16 @@ impl Palette {
     /// Terminal 16-color theme.
     pub fn terminal() -> Self {
         Self {
+            active_tab_fg: None,
+            active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Blue,
             panel_bg: Color::Reset,
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::DarkGray,
             selection_bg: Color::Reset,
             surface0: Color::Reset,
@@ -152,9 +186,16 @@ impl Palette {
     /// Tokyo Night — blue-purple aesthetic.
     pub fn tokyo_night() -> Self {
         Self {
+            active_tab_fg: None,
+            active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(122, 162, 247), // blue
             panel_bg: Color::Rgb(26, 27, 38),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(35, 38, 54),
             selection_bg: Color::Rgb(45, 54, 80),
             surface0: Color::Rgb(36, 40, 59),
@@ -177,9 +218,16 @@ impl Palette {
     /// Tokyo Night Day — the light Tokyo Night style.
     pub fn tokyo_night_day() -> Self {
         Self {
+            active_tab_fg: None,
+            active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(46, 125, 233),
             panel_bg: Color::Rgb(225, 226, 231),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(210, 211, 218),
             selection_bg: Color::Rgb(182, 202, 231),
             surface0: Color::Rgb(196, 200, 218),
@@ -202,9 +250,16 @@ impl Palette {
     /// Dracula — purple/pink/green.
     pub fn dracula() -> Self {
         Self {
+            active_tab_fg: None,
+            active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(189, 147, 249), // purple
             panel_bg: Color::Rgb(40, 42, 54),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(55, 60, 82),
             selection_bg: Color::Rgb(70, 63, 93),
             surface0: Color::Rgb(68, 71, 90),
@@ -227,9 +282,16 @@ impl Palette {
     /// Nord — frosty blue palette.
     pub fn nord() -> Self {
         Self {
+            active_tab_fg: None,
+            active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(136, 192, 208), // frost
             panel_bg: Color::Rgb(46, 52, 64),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(67, 76, 94),
             selection_bg: Color::Rgb(64, 80, 93),
             surface0: Color::Rgb(59, 66, 82),
@@ -252,9 +314,16 @@ impl Palette {
     /// Gruvbox Dark — warm retro palette.
     pub fn gruvbox() -> Self {
         Self {
+            active_tab_fg: None,
+            active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(215, 153, 33), // yellow
             panel_bg: Color::Rgb(40, 40, 40),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(50, 49, 48),
             selection_bg: Color::Rgb(75, 63, 39),
             surface0: Color::Rgb(60, 56, 54),
@@ -277,9 +346,16 @@ impl Palette {
     /// Gruvbox Light — the light retro palette.
     pub fn gruvbox_light() -> Self {
         Self {
+            active_tab_fg: None,
+            active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(7, 102, 120),
             panel_bg: Color::Rgb(251, 241, 199),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(242, 229, 188),
             selection_bg: Color::Rgb(235, 219, 178),
             surface0: Color::Rgb(235, 219, 178),
@@ -302,9 +378,16 @@ impl Palette {
     /// One Dark — Atom's classic dark theme.
     pub fn one_dark() -> Self {
         Self {
+            active_tab_fg: None,
+            active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(97, 175, 239), // blue
             panel_bg: Color::Rgb(40, 44, 52),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(49, 54, 64),
             selection_bg: Color::Rgb(51, 70, 89),
             surface0: Color::Rgb(44, 49, 58),
@@ -327,9 +410,16 @@ impl Palette {
     /// One Light — Atom's classic light theme.
     pub fn one_light() -> Self {
         Self {
+            active_tab_fg: None,
+            active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(64, 120, 242),
             panel_bg: Color::Rgb(250, 250, 250),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(216, 219, 226),
             selection_bg: Color::Rgb(205, 219, 248),
             surface0: Color::Rgb(240, 240, 241),
@@ -352,9 +442,16 @@ impl Palette {
     /// Solarized Dark — Ethan Schoonover's classic.
     pub fn solarized() -> Self {
         Self {
+            active_tab_fg: None,
+            active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(38, 139, 210), // blue
             panel_bg: Color::Rgb(0, 43, 54),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(22, 75, 87),
             selection_bg: Color::Rgb(8, 62, 85),
             surface0: Color::Rgb(7, 54, 66),
@@ -377,9 +474,16 @@ impl Palette {
     /// Solarized Light — Ethan Schoonover's light variant.
     pub fn solarized_light() -> Self {
         Self {
+            active_tab_fg: None,
+            active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(38, 139, 210),
             panel_bg: Color::Rgb(253, 246, 227),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(238, 232, 213),
             selection_bg: Color::Rgb(201, 220, 223),
             surface0: Color::Rgb(238, 232, 213),
@@ -402,9 +506,16 @@ impl Palette {
     /// Kanagawa — inspired by Katsushika Hokusai.
     pub fn kanagawa() -> Self {
         Self {
+            active_tab_fg: None,
+            active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(126, 156, 216), // blue
             panel_bg: Color::Rgb(31, 31, 40),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(54, 54, 70),
             selection_bg: Color::Rgb(50, 56, 75),
             surface0: Color::Rgb(42, 42, 55),
@@ -427,9 +538,16 @@ impl Palette {
     /// Kanagawa Lotus — the light Kanagawa variant.
     pub fn kanagawa_lotus() -> Self {
         Self {
+            active_tab_fg: None,
+            active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(77, 105, 155),
             panel_bg: Color::Rgb(242, 236, 188),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(213, 206, 163),
             selection_bg: Color::Rgb(220, 213, 172),
             surface0: Color::Rgb(220, 213, 172),
@@ -452,9 +570,16 @@ impl Palette {
     /// Rosé Pine — muted, elegant.
     pub fn rose_pine() -> Self {
         Self {
+            active_tab_fg: None,
+            active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(196, 167, 231), // iris
             panel_bg: Color::Rgb(25, 23, 36),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(38, 35, 58),
             selection_bg: Color::Rgb(59, 52, 75),
             surface0: Color::Rgb(31, 29, 46),
@@ -477,9 +602,16 @@ impl Palette {
     /// Rosé Pine Dawn — the light Rosé Pine variant.
     pub fn rose_pine_dawn() -> Self {
         Self {
+            active_tab_fg: None,
+            active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(144, 122, 169),
             panel_bg: Color::Rgb(250, 244, 237),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(227, 217, 207),
             selection_bg: Color::Rgb(242, 233, 225),
             surface0: Color::Rgb(242, 233, 225),
@@ -502,9 +634,16 @@ impl Palette {
     /// Vesper — minimal high-contrast monochrome with peach and mint accents.
     pub fn vesper() -> Self {
         Self {
+            active_tab_fg: None,
+            active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
+            popup_bg: None,
+            popup_border: None,
             accent: Color::Rgb(255, 199, 153),
             panel_bg: Color::Rgb(26, 26, 26),
             sidebar_bg: Color::Reset,
+            pane_inactive_bg: None,
             active_row_bg: Color::Rgb(16, 16, 16),
             selection_bg: Color::Rgb(35, 35, 35),
             surface0: Color::Rgb(35, 35, 35),
@@ -552,6 +691,24 @@ impl Palette {
     /// Apply custom color overrides on top of this palette.
     pub fn with_overrides(mut self, custom: &crate::config::CustomThemeColors) -> Self {
         use crate::config::parse_color;
+        if let Some(c) = &custom.active_tab_fg {
+            self.active_tab_fg = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.active_tab_bg {
+            self.active_tab_bg = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.pane_border_active {
+            self.pane_border_active = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.pane_border_inactive {
+            self.pane_border_inactive = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.popup_bg {
+            self.popup_bg = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.popup_border {
+            self.popup_border = Some(parse_color(c));
+        }
         if let Some(c) = &custom.accent {
             self.accent = parse_color(c);
         }
@@ -560,6 +717,9 @@ impl Palette {
         }
         if let Some(c) = &custom.sidebar_bg {
             self.sidebar_bg = parse_color(c);
+        }
+        if let Some(c) = &custom.pane_inactive_bg {
+            self.pane_inactive_bg = Some(parse_color(c));
         }
         if let Some(c) = &custom.active_row_bg {
             self.active_row_bg = parse_color(c);
@@ -614,6 +774,24 @@ impl Palette {
 
     pub fn with_mode_overrides(mut self, custom: &crate::config::ModeThemeColors) -> Self {
         use crate::config::parse_color;
+        if let Some(c) = &custom.active_tab_fg {
+            self.active_tab_fg = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.active_tab_bg {
+            self.active_tab_bg = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.pane_border_active {
+            self.pane_border_active = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.pane_border_inactive {
+            self.pane_border_inactive = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.popup_bg {
+            self.popup_bg = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.popup_border {
+            self.popup_border = Some(parse_color(c));
+        }
         if let Some(c) = &custom.accent {
             self.accent = parse_color(c);
         }
@@ -622,6 +800,9 @@ impl Palette {
         }
         if let Some(c) = &custom.sidebar_bg {
             self.sidebar_bg = parse_color(c);
+        }
+        if let Some(c) = &custom.pane_inactive_bg {
+            self.pane_inactive_bg = Some(parse_color(c));
         }
         if let Some(c) = &custom.active_row_bg {
             self.active_row_bg = parse_color(c);
@@ -834,7 +1015,16 @@ pub struct AppState {
     pub pane_outer_borders: bool,
     pub pane_scrollbars: bool,
     pub pane_gaps: bool,
+    /// Per-state pane frame line styles (`ui.pane_border_style*`); all unset is stock.
+    pub pane_border_styles: crate::config::PaneBorderStyles,
+    /// Valid `ui.pane_gap_cells` override; `None` keeps the legacy `pane_gaps` path.
+    pub pane_gap_cells: Option<u16>,
+    /// Effective `ui.pane_padding_cells`; 0 keeps the unpadded content rect.
+    pub pane_padding_cells: u16,
     pub show_agent_labels_on_pane_borders: bool,
+    pub pane_title_tokens: Option<Vec<crate::config::AgentSidebarToken>>,
+    pub pane_manual_label_first: bool,
+    pub pane_border_identity_token: Option<crate::config::AgentSidebarToken>,
     pub tab_bar_right: Vec<TabBarStatusSegment>,
     pub tab_bar_right_separator: String,
     /// Expose the focused pane's cursor anchor to the outer terminal even when
@@ -893,6 +1083,14 @@ pub struct AppState {
 impl AppState {
     pub(crate) fn mark_session_dirty(&mut self) {
         self.session_dirty = true;
+    }
+
+    /// Inter-pane spacing: the `pane_gap_cells` override when set, else legacy `pane_gaps`.
+    pub(crate) fn pane_spacing(&self) -> crate::ui::PaneSpacing {
+        match self.pane_gap_cells {
+            Some(cells) => crate::ui::PaneSpacing::Cells(cells),
+            None => crate::ui::PaneSpacing::Legacy(self.pane_gaps),
+        }
     }
 
     pub(crate) fn remove_alias_shadowed_by_new_pane(&mut self, pane_id: PaneId) {
@@ -1076,7 +1274,13 @@ impl AppState {
             pane_outer_borders: true,
             pane_scrollbars: true,
             pane_gaps: false,
+            pane_border_styles: crate::config::PaneBorderStyles::default(),
+            pane_gap_cells: None,
+            pane_padding_cells: 0,
             show_agent_labels_on_pane_borders: false,
+            pane_title_tokens: None,
+            pane_manual_label_first: false,
+            pane_border_identity_token: None,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: " ".into(),
             reveal_hidden_cursor_for_cjk_ime: false,
@@ -1409,6 +1613,146 @@ mod tests {
     }
 
     #[test]
+    fn built_in_themes_leave_active_tab_colors_unset() {
+        assert_eq!(crate::config::THEME_NAMES.len(), 18);
+        for name in crate::config::THEME_NAMES {
+            let palette = Palette::from_name(name).unwrap();
+            assert_eq!(palette.active_tab_fg, None, "theme: {name}");
+            assert_eq!(palette.active_tab_bg, None, "theme: {name}");
+        }
+    }
+
+    #[test]
+    fn active_tab_mode_overrides_inherit_common_and_preserve_reset() {
+        let common = crate::config::CustomThemeColors {
+            active_tab_fg: Some("red".into()),
+            active_tab_bg: Some("blue".into()),
+            ..Default::default()
+        };
+        let palette = Palette::catppuccin().with_overrides(&common);
+        assert_eq!(palette.active_tab_fg, Some(Color::Red));
+        assert_eq!(palette.active_tab_bg, Some(Color::Blue));
+        for alias in ["reset", "default", "none", "transparent"] {
+            let mode = crate::config::ModeThemeColors {
+                active_tab_fg: Some(alias.into()),
+                ..Default::default()
+            };
+            let resolved = palette.clone().with_mode_overrides(&mode);
+            assert_eq!(resolved.active_tab_fg, Some(Color::Reset));
+            assert_eq!(resolved.active_tab_bg, Some(Color::Blue));
+            let mode = crate::config::ModeThemeColors {
+                active_tab_bg: Some(alias.into()),
+                ..Default::default()
+            };
+            let resolved = palette.clone().with_mode_overrides(&mode);
+            assert_eq!(resolved.active_tab_fg, Some(Color::Red));
+            assert_eq!(resolved.active_tab_bg, Some(Color::Reset));
+        }
+    }
+
+    #[test]
+    fn built_in_themes_leave_pane_border_colors_unset() {
+        assert_eq!(crate::config::THEME_NAMES.len(), 18);
+        for name in crate::config::THEME_NAMES {
+            let palette = Palette::from_name(name).unwrap();
+            assert_eq!(palette.pane_border_active, None, "theme: {name}");
+            assert_eq!(palette.pane_border_inactive, None, "theme: {name}");
+        }
+    }
+
+    #[test]
+    fn pane_border_mode_overrides_inherit_common_and_preserve_reset() {
+        let base = Palette::catppuccin();
+        let common = crate::config::CustomThemeColors {
+            pane_border_active: Some("red".into()),
+            pane_border_inactive: Some("blue".into()),
+            ..Default::default()
+        };
+        let palette = base.clone().with_overrides(&common);
+        assert_eq!(palette.pane_border_active, Some(Color::Red));
+        assert_eq!(palette.pane_border_inactive, Some(Color::Blue));
+        // Pane border keys never rewrite the shared accent / overlay0 tokens.
+        assert_eq!(palette.accent, base.accent);
+        assert_eq!(palette.overlay0, base.overlay0);
+        assert_eq!(
+            palette.clone().with_mode_overrides(&Default::default()),
+            palette
+        );
+        for alias in ["reset", "default", "none", "transparent"] {
+            let mode = crate::config::ModeThemeColors {
+                pane_border_active: Some(alias.into()),
+                ..Default::default()
+            };
+            let resolved = palette.clone().with_mode_overrides(&mode);
+            assert_eq!(resolved.pane_border_active, Some(Color::Reset));
+            assert_eq!(resolved.pane_border_inactive, Some(Color::Blue));
+            let mode = crate::config::ModeThemeColors {
+                pane_border_inactive: Some(alias.into()),
+                ..Default::default()
+            };
+            let resolved = palette.clone().with_mode_overrides(&mode);
+            assert_eq!(resolved.pane_border_active, Some(Color::Red));
+            assert_eq!(resolved.pane_border_inactive, Some(Color::Reset));
+        }
+        let invalid = crate::config::ModeThemeColors {
+            pane_border_active: Some("not-a-color".into()),
+            pane_border_inactive: Some("#zzzzzz".into()),
+            ..Default::default()
+        };
+        let resolved = palette.with_mode_overrides(&invalid);
+        assert_eq!(resolved.pane_border_active, Some(Color::Cyan));
+        assert_eq!(resolved.pane_border_inactive, Some(Color::Cyan));
+    }
+
+    #[test]
+    fn built_in_themes_leave_popup_colors_unset() {
+        assert_eq!(crate::config::THEME_NAMES.len(), 18);
+        for name in crate::config::THEME_NAMES {
+            let palette = Palette::from_name(name).unwrap();
+            assert_eq!(palette.popup_bg, None, "theme: {name}");
+            assert_eq!(palette.popup_border, None, "theme: {name}");
+        }
+    }
+
+    #[test]
+    fn popup_mode_overrides_inherit_common_and_preserve_reset() {
+        let common = crate::config::CustomThemeColors {
+            popup_bg: Some("red".into()),
+            popup_border: Some("blue".into()),
+            ..Default::default()
+        };
+        let palette = Palette::catppuccin().with_overrides(&common);
+        assert_eq!(palette.popup_bg, Some(Color::Red));
+        assert_eq!(palette.popup_border, Some(Color::Blue));
+        assert_eq!(palette.accent, Palette::catppuccin().accent);
+        assert_eq!(palette.panel_bg, Palette::catppuccin().panel_bg);
+        for alias in ["reset", "default", "none", "transparent"] {
+            let mode = crate::config::ModeThemeColors {
+                popup_bg: Some(alias.into()),
+                ..Default::default()
+            };
+            let resolved = palette.clone().with_mode_overrides(&mode);
+            assert_eq!(resolved.popup_bg, Some(Color::Reset));
+            assert_eq!(resolved.popup_border, Some(Color::Blue));
+            let mode = crate::config::ModeThemeColors {
+                popup_border: Some(alias.into()),
+                ..Default::default()
+            };
+            let resolved = palette.clone().with_mode_overrides(&mode);
+            assert_eq!(resolved.popup_bg, Some(Color::Red));
+            assert_eq!(resolved.popup_border, Some(Color::Reset));
+        }
+        let invalid = crate::config::CustomThemeColors {
+            popup_bg: Some("not-a-color".into()),
+            popup_border: Some("#zzzzzz".into()),
+            ..Default::default()
+        };
+        let palette = Palette::catppuccin().with_overrides(&invalid);
+        assert_eq!(palette.popup_bg, Some(Color::Cyan));
+        assert_eq!(palette.popup_border, Some(Color::Cyan));
+    }
+
+    #[test]
     fn built_in_active_rows_remain_visible_with_matching_terminal_backgrounds() {
         for name in crate::config::THEME_NAMES
             .iter()
@@ -1466,6 +1810,52 @@ mod tests {
                 "built-in theme changed the sidebar background: {name}"
             );
         }
+    }
+
+    #[test]
+    fn built_in_themes_leave_pane_inactive_bg_unset() {
+        assert_eq!(crate::config::THEME_NAMES.len(), 18);
+        for name in crate::config::THEME_NAMES {
+            let palette = Palette::from_name(name).unwrap();
+            assert_eq!(palette.pane_inactive_bg, None, "theme: {name}");
+        }
+    }
+
+    #[test]
+    fn pane_inactive_bg_mode_overrides_inherit_common_and_preserve_reset() {
+        let common = crate::config::CustomThemeColors {
+            pane_inactive_bg: Some("#101820".into()),
+            ..Default::default()
+        };
+        let palette = Palette::catppuccin().with_overrides(&common);
+        assert_eq!(palette.pane_inactive_bg, Some(Color::Rgb(0x10, 0x18, 0x20)));
+        let inherited = palette
+            .clone()
+            .with_mode_overrides(&crate::config::ModeThemeColors::default());
+        assert_eq!(
+            inherited.pane_inactive_bg,
+            Some(Color::Rgb(0x10, 0x18, 0x20))
+        );
+        for alias in ["reset", "default", "none", "transparent"] {
+            let mode = crate::config::ModeThemeColors {
+                pane_inactive_bg: Some(alias.into()),
+                ..Default::default()
+            };
+            let resolved = palette.clone().with_mode_overrides(&mode);
+            assert_eq!(
+                resolved.pane_inactive_bg,
+                Some(Color::Reset),
+                "alias: {alias}"
+            );
+        }
+        let invalid = crate::config::ModeThemeColors {
+            pane_inactive_bg: Some("not-a-color".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            palette.with_mode_overrides(&invalid).pane_inactive_bg,
+            Some(Color::Cyan)
+        );
     }
 
     #[test]

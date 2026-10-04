@@ -2121,12 +2121,13 @@ impl App {
         let tab = ws.tabs.get(tab_idx)?;
         let area = self.state.view.terminal_area;
         let focused_pane_id = self.public_pane_id(ws_idx, tab.layout.focused())?;
-        let panes = crate::ui::apply_pane_chrome(
+        let panes = crate::ui::apply_pane_spacing(
             tab.layout.panes(area),
             self.state.pane_borders,
-            self.state.pane_gaps,
+            self.state.pane_spacing(),
             self.state.pane_outer_borders,
         )
+        .0
         .into_iter()
         .filter_map(|pane| {
             Some(PaneLayoutPane {
@@ -4437,6 +4438,130 @@ mod tests {
             app.state.terminals[&terminal_id].metadata_tokens.values(),
             std::collections::HashMap::from([("summary".into(), "global".into())])
         );
+    }
+
+    #[test]
+    fn pane_title_tokens_follow_metadata_patch_sequence_clear_and_expiry() {
+        let (mut app, pane_id) = app_with_test_workspace();
+        app.state.active = Some(0);
+        app.state.pane_borders = crate::config::PaneBordersConfig::Always;
+        app.state.pane_title_tokens = Some(vec![crate::config::AgentSidebarToken::Custom(
+            "task".into(),
+        )]);
+        let area = ratatui::layout::Rect::new(0, 0, 30, 5);
+        let title = |app: &App| {
+            let layout = crate::ui::compute_tab_surface_for(
+                &app.state,
+                &app.terminal_runtimes,
+                Some(crate::ui::TabSurfaceTarget {
+                    workspace_index: 0,
+                    tab_index: 0,
+                }),
+                area,
+                false,
+                Default::default(),
+            );
+            let (buffer, _, _, _) = crate::server::render_stream::render_tab_surface_virtual(
+                &app.state,
+                &app.terminal_runtimes,
+                layout,
+                area,
+            );
+            (1..29)
+                .map(|x| buffer[(x, 0)].symbol())
+                .collect::<String>()
+                .trim_end_matches('─')
+                .to_string()
+        };
+        let report = |app: &mut App, value: Option<&str>, seq: u64, ttl_ms: Option<u64>| {
+            let mut params = metadata_params(pane_id.clone());
+            params.title = None;
+            params.tokens =
+                std::collections::HashMap::from([("task".into(), value.map(str::to_string))]);
+            params.seq = Some(seq);
+            params.ttl_ms = ttl_ms;
+            let response = app.handle_pane_report_metadata("tokens".into(), params);
+            let _: SuccessResponse = serde_json::from_str(&response).unwrap();
+        };
+
+        assert_eq!(title(&app), "");
+        report(&mut app, Some("build"), 5, None);
+        assert_eq!(title(&app), " build ");
+        report(&mut app, Some("stale"), 4, None);
+        assert_eq!(title(&app), " build ");
+        report(&mut app, None, 6, None);
+        assert_eq!(title(&app), "");
+        report(&mut app, Some("deploy"), 7, Some(1_000));
+        assert_eq!(title(&app), " deploy ");
+
+        app.sync_agent_metadata_deadline();
+        let later = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        app.expire_metadata_at(later, later);
+        assert_eq!(title(&app), "");
+    }
+
+    #[test]
+    fn pane_border_identity_follows_metadata_patch_clear_and_expiry() {
+        let (mut app, pane_id) = app_with_test_workspace();
+        app.state.active = Some(0);
+        // The new pane takes focus, leaving the reporting pane unfocused on the left.
+        app.state.workspaces[0].test_split(ratatui::layout::Direction::Horizontal);
+        app.state.ensure_test_terminals();
+        app.state.pane_border_identity_token = toml::from_str::<Config>(
+            "[ui]\npane_border_identity_token = { token = \"$role\", fg = \"#a6e3a1\" }",
+        )
+        .unwrap()
+        .ui
+        .pane_border_identity_token;
+        let identity = ratatui::style::Color::Rgb(0xa6, 0xe3, 0xa1);
+        let inactive = app.state.palette.overlay0;
+        let area = ratatui::layout::Rect::new(0, 0, 30, 6);
+        let left_edge = |app: &App| {
+            let layout = crate::ui::compute_tab_surface_for(
+                &app.state,
+                &app.terminal_runtimes,
+                Some(crate::ui::TabSurfaceTarget {
+                    workspace_index: 0,
+                    tab_index: 0,
+                }),
+                area,
+                false,
+                Default::default(),
+            );
+            let (buffer, _, _, _) = crate::server::render_stream::render_tab_surface_virtual(
+                &app.state,
+                &app.terminal_runtimes,
+                layout,
+                area,
+            );
+            assert_eq!(buffer[(0, 2)].symbol(), "│");
+            buffer[(0, 2)].fg
+        };
+        let report = |app: &mut App, value: Option<&str>, seq: u64, ttl_ms: Option<u64>| {
+            let mut params = metadata_params(pane_id.clone());
+            params.title = None;
+            params.tokens =
+                std::collections::HashMap::from([("role".into(), value.map(str::to_string))]);
+            params.seq = Some(seq);
+            params.ttl_ms = ttl_ms;
+            let response = app.handle_pane_report_metadata("tokens".into(), params);
+            let _: SuccessResponse = serde_json::from_str(&response).unwrap();
+        };
+
+        assert_eq!(left_edge(&app), inactive);
+        report(&mut app, Some("build"), 5, None);
+        assert_eq!(left_edge(&app), identity);
+        report(&mut app, None, 4, None);
+        assert_eq!(left_edge(&app), identity);
+        report(&mut app, None, 6, None);
+        assert_eq!(left_edge(&app), inactive);
+        report(&mut app, Some("deploy"), 7, Some(1_000));
+        assert_eq!(left_edge(&app), identity);
+
+        app.sync_agent_metadata_deadline();
+        let later = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        app.expire_metadata_at(later, later);
+        assert_eq!(left_edge(&app), inactive);
     }
 
     #[test]

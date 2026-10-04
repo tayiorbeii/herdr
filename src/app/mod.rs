@@ -491,7 +491,13 @@ impl App {
             pane_outer_borders: config.ui.pane_outer_borders,
             pane_scrollbars: config.ui.pane_scrollbars,
             pane_gaps: config.ui.pane_gaps,
+            pane_border_styles: config.ui.pane_border_styles(),
+            pane_gap_cells: config.ui.pane_gap_cells(),
+            pane_padding_cells: config.ui.pane_padding_cells(),
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
+            pane_title_tokens: config.ui.pane_title_tokens.clone(),
+            pane_manual_label_first: config.ui.pane_manual_label_first,
+            pane_border_identity_token: config.ui.pane_border_identity_token.clone(),
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: String::new(),
             reveal_hidden_cursor_for_cjk_ime: config.experimental.reveal_hidden_cursor_for_cjk_ime,
@@ -833,6 +839,9 @@ impl App {
                 diagnostics.extend(crate::config::window_title_diagnostics(
                     &config.ui.window_title,
                 ));
+                diagnostics.extend(config.ui.invalid_pane_border_style_diagnostics());
+                diagnostics.extend(config.ui.invalid_pane_gap_cells_diagnostic());
+                diagnostics.extend(config.ui.pane_padding_cells_diagnostic());
 
                 self.loaded_host_cursor = config.ui.host_cursor;
                 self.state.confirm_close = config.ui.confirm_close;
@@ -840,8 +849,15 @@ impl App {
                 self.state.pane_outer_borders = config.ui.pane_outer_borders;
                 self.state.pane_scrollbars = config.ui.pane_scrollbars;
                 self.state.pane_gaps = config.ui.pane_gaps;
+                self.state.pane_border_styles = config.ui.pane_border_styles();
+                self.state.pane_gap_cells = config.ui.pane_gap_cells();
+                self.state.pane_padding_cells = config.ui.pane_padding_cells();
                 self.state.show_agent_labels_on_pane_borders =
                     config.ui.show_agent_labels_on_pane_borders;
+                self.state.pane_title_tokens = config.ui.pane_title_tokens.clone();
+                self.state.pane_manual_label_first = config.ui.pane_manual_label_first;
+                self.state.pane_border_identity_token =
+                    config.ui.pane_border_identity_token.clone();
                 self.configure_tab_bar_status(
                     &config.ui.tab_bar_right,
                     &config.ui.tab_bar_right_separator,
@@ -1356,6 +1372,133 @@ mod tests {
     }
 
     #[test]
+    fn active_tab_colors_follow_common_legacy_accent_and_selected_mode() {
+        use crate::terminal_theme::HostAppearance;
+        use ratatui::style::Color;
+
+        let mut config: Config = toml::from_str(
+            r##"
+[ui]
+accent = "red"
+[theme]
+name = "terminal"
+auto_switch = true
+[theme.custom]
+active_tab_fg = "blue"
+[theme.custom.light]
+accent = "yellow"
+active_tab_bg = "green"
+[theme.custom.dark]
+active_tab_fg = "reset"
+"##,
+        )
+        .unwrap();
+        let runtime = client_theme_runtime_from_config(&config);
+        let dark = client_palette_from_config(&config);
+        assert_eq!(dark.active_tab_fg, Some(Color::Reset));
+        assert_eq!(dark.active_tab_bg, None);
+        assert_eq!(dark.accent, Color::Red);
+        let light = client_palette_for_appearance(&runtime, HostAppearance::Light);
+        assert_eq!(light.active_tab_fg, Some(Color::Blue));
+        assert_eq!(light.active_tab_bg, Some(Color::Green));
+        assert_eq!(light.accent, Color::Yellow);
+
+        config.theme.auto_switch = false;
+        let runtime = client_theme_runtime_from_config(&config);
+        for appearance in [HostAppearance::Light, HostAppearance::Dark] {
+            let manual = client_palette_for_appearance(&runtime, appearance);
+            assert_eq!(manual.active_tab_fg, Some(Color::Blue));
+            assert_eq!(manual.active_tab_bg, None);
+            assert_eq!(manual.accent, Color::Red);
+        }
+        config.theme.custom.as_mut().unwrap().accent = Some("magenta".into());
+        assert_eq!(client_palette_from_config(&config).accent, Color::Magenta);
+    }
+
+    #[test]
+    fn popup_colors_follow_common_legacy_accent_and_selected_mode() {
+        use crate::terminal_theme::HostAppearance;
+        use ratatui::style::Color;
+
+        let mut config: Config = toml::from_str(
+            r##"
+[ui]
+accent = "red"
+[theme]
+name = "terminal"
+auto_switch = true
+[theme.custom]
+popup_bg = "blue"
+[theme.custom.light]
+accent = "yellow"
+popup_border = "green"
+[theme.custom.dark]
+popup_bg = "reset"
+"##,
+        )
+        .unwrap();
+        let runtime = client_theme_runtime_from_config(&config);
+        let dark = client_palette_from_config(&config);
+        assert_eq!(dark.popup_bg, Some(Color::Reset));
+        assert_eq!(dark.popup_border, None);
+        assert_eq!(dark.accent, Color::Red);
+        let light = client_palette_for_appearance(&runtime, HostAppearance::Light);
+        assert_eq!(light.popup_bg, Some(Color::Blue));
+        assert_eq!(light.popup_border, Some(Color::Green));
+        assert_eq!(light.accent, Color::Yellow);
+
+        config.theme.auto_switch = false;
+        let runtime = client_theme_runtime_from_config(&config);
+        for appearance in [HostAppearance::Light, HostAppearance::Dark] {
+            let manual = client_palette_for_appearance(&runtime, appearance);
+            assert_eq!(manual.popup_bg, Some(Color::Blue));
+            assert_eq!(manual.popup_border, None);
+            assert_eq!(manual.accent, Color::Red);
+        }
+    }
+
+    #[test]
+    fn pane_inactive_bg_follows_common_legacy_accent_and_selected_mode() {
+        use crate::terminal_theme::HostAppearance;
+        use ratatui::style::Color;
+
+        let mut config: Config = toml::from_str(
+            r##"
+[ui]
+accent = "red"
+[theme]
+name = "terminal"
+auto_switch = true
+[theme.custom]
+pane_inactive_bg = "blue"
+[theme.custom.light]
+pane_inactive_bg = "green"
+[theme.custom.dark]
+pane_inactive_bg = "reset"
+"##,
+        )
+        .unwrap();
+        let runtime = client_theme_runtime_from_config(&config);
+        let dark = client_palette_from_config(&config);
+        assert_eq!(dark.pane_inactive_bg, Some(Color::Reset));
+        assert_eq!(dark.accent, Color::Red);
+        let light = client_palette_for_appearance(&runtime, HostAppearance::Light);
+        assert_eq!(light.pane_inactive_bg, Some(Color::Green));
+
+        config.theme.auto_switch = false;
+        let runtime = client_theme_runtime_from_config(&config);
+        for appearance in [HostAppearance::Light, HostAppearance::Dark] {
+            let manual = client_palette_for_appearance(&runtime, appearance);
+            assert_eq!(manual.pane_inactive_bg, Some(Color::Blue));
+            assert_eq!(manual.accent, Color::Red);
+        }
+        assert_eq!(
+            client_palette_from_config(&Config::default()).pane_inactive_bg,
+            None
+        );
+    }
+
+    #[test]
     fn theme_auto_switch_is_opt_in_and_preserves_manual_default() {
         let mut config = Config::default();
         config.theme.name = Some("tokyo-night".to_string());
@@ -1495,6 +1638,56 @@ mod tests {
             ratatui::style::Color::Rgb(7, 8, 9)
         );
         assert_eq!(app.state.palette.text, ratatui::style::Color::Rgb(4, 5, 6));
+    }
+
+    #[test]
+    fn pane_border_colors_follow_common_and_selected_mode() {
+        use crate::terminal_theme::HostAppearance;
+        use ratatui::style::Color;
+
+        let mut config: Config = toml::from_str(
+            r##"
+[ui]
+accent = "red"
+[theme]
+name = "terminal"
+auto_switch = true
+[theme.custom]
+pane_border_inactive = "blue"
+[theme.custom.light]
+accent = "yellow"
+pane_border_active = "green"
+[theme.custom.dark]
+pane_border_inactive = "reset"
+"##,
+        )
+        .unwrap();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &config,
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        // Server-side palette (pane borders are rendered into the server surface).
+        assert_eq!(app.state.palette.pane_border_active, None);
+        assert_eq!(app.state.palette.pane_border_inactive, Some(Color::Reset));
+        assert_eq!(app.state.palette.accent, Color::Red);
+        assert!(app.set_host_terminal_appearance_state(Some(HostAppearance::Light), true));
+        assert_eq!(app.state.palette.pane_border_active, Some(Color::Green));
+        assert_eq!(app.state.palette.pane_border_inactive, Some(Color::Blue));
+        assert_eq!(app.state.palette.accent, Color::Yellow);
+
+        // Mode tables apply only with auto_switch.
+        config.theme.auto_switch = false;
+        let runtime = theme_runtime_config(&config, true);
+        for appearance in [HostAppearance::Light, HostAppearance::Dark] {
+            let (manual, _) = resolve_effective_theme(&runtime, Some(appearance));
+            assert_eq!(manual.pane_border_active, None);
+            assert_eq!(manual.pane_border_inactive, Some(Color::Blue));
+            assert_eq!(manual.accent, Color::Red);
+        }
     }
 
     #[test]
@@ -1745,6 +1938,124 @@ mod tests {
     }
 
     #[test]
+    fn reload_config_applies_and_removes_pane_border_colors() {
+        use ratatui::style::Color;
+
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-pane-border-colors");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "[update]\nversion_check = false\nmanifest_check = false\n",
+        )
+        .unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+
+        let mut app = test_app();
+        let baseline = app.state.palette.clone();
+        assert_eq!(baseline.pane_border_active, None);
+        assert_eq!(baseline.pane_border_inactive, None);
+
+        std::fs::write(
+            &path,
+            "[update]\nversion_check = false\nmanifest_check = false\n[theme.custom]\npane_border_active = \"#010203\"\npane_border_inactive = \"reset\"\n",
+        )
+        .unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert_eq!(
+            app.state.palette.pane_border_active,
+            Some(Color::Rgb(1, 2, 3))
+        );
+        assert_eq!(app.state.palette.pane_border_inactive, Some(Color::Reset));
+        assert_eq!(app.state.palette.accent, baseline.accent);
+        assert_eq!(app.state.palette.overlay0, baseline.overlay0);
+
+        std::fs::write(
+            &path,
+            "[update]\nversion_check = false\nmanifest_check = false\n",
+        )
+        .unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert_eq!(app.state.palette, baseline);
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_config_applies_and_removes_pane_border_styles() {
+        use crate::config::{PaneBorderStyle, PaneBorderStyles};
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-pane-border-styles");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let base = "[update]\nversion_check = false\nmanifest_check = false\n[ui]\n";
+
+        let mut app = test_app();
+        assert_eq!(app.state.pane_border_styles, PaneBorderStyles::default());
+        let heavy_double = PaneBorderStyles {
+            all: Some(PaneBorderStyle::Heavy),
+            active: Some(PaneBorderStyle::Double),
+            inactive: None,
+        };
+        for (body, expected, diagnostics) in [
+            (
+                "pane_border_style = \"heavy\"\npane_border_style_active = \"double\"\n",
+                heavy_double,
+                vec![],
+            ),
+            (
+                "pane_border_style_inactive = \"rounded-dashed-2\"\n",
+                PaneBorderStyles {
+                    inactive: Some(PaneBorderStyle::RoundedDashed(
+                        crate::config::BorderDash::Two,
+                    )),
+                    ..PaneBorderStyles::default()
+                },
+                vec![],
+            ),
+            // A malformed override disables only itself; the rest of [ui] applies.
+            (
+                "pane_border_style = \"heavy\"\npane_border_style_active = \"thick\"\npane_scrollbars = false\n",
+                PaneBorderStyles {
+                    all: Some(PaneBorderStyle::Heavy),
+                    ..PaneBorderStyles::default()
+                },
+                vec![
+                    "ui.pane_border_style_active must be light, rounded, heavy, double, light-dashed-N, heavy-dashed-N or rounded-dashed-N with N from 2 to 4 (got \"thick\"); using pane_border_style".to_string(),
+                ],
+            ),
+            (
+                "pane_border_style = \"heavy\"\npane_border_style_active = \"double\"\n",
+                heavy_double,
+                vec![],
+            ),
+            ("", PaneBorderStyles::default(), vec![]),
+        ] {
+            std::fs::write(&path, format!("{base}{body}")).unwrap();
+            let report = app.reload_config();
+            let status = if diagnostics.is_empty() {
+                crate::config::ConfigReloadStatus::Applied
+            } else {
+                crate::config::ConfigReloadStatus::Partial
+            };
+            assert_eq!(report.status, status, "{body:?}");
+            assert_eq!(app.state.pane_border_styles, expected, "{body:?}");
+            assert_eq!(report.diagnostics, diagnostics, "{body:?}");
+            assert_eq!(
+                app.state.pane_scrollbars,
+                !body.contains("pane_scrollbars = false"),
+                "{body:?}"
+            );
+        }
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
     fn reload_config_keeps_kitty_graphics_until_restart() {
         let _guard = config_env_lock().lock().unwrap();
         let path = temp_config_path("reload-config-kitty-graphics");
@@ -1769,6 +2080,59 @@ mod tests {
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_config_applies_and_removes_pane_title_tokens() {
+        let mut app = test_app();
+        assert_eq!(app.state.pane_title_tokens, None);
+        assert!(!app.state.pane_manual_label_first);
+
+        let config: Config =
+            toml::from_str("[ui]\npane_title_tokens = [\"$task\"]\npane_manual_label_first = true")
+                .unwrap();
+        let report = app.apply_live_config(&config, &[], &[], false);
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert_eq!(
+            app.state.pane_title_tokens,
+            Some(vec![crate::config::AgentSidebarToken::Custom(
+                "task".into()
+            )])
+        );
+        assert!(app.state.pane_manual_label_first);
+
+        // An invalid [ui] section keeps the previous settings.
+        app.apply_live_config(&Config::default(), &[], &["ui".into()], false);
+        assert!(app.state.pane_title_tokens.is_some());
+
+        app.apply_live_config(&Config::default(), &[], &[], false);
+        assert_eq!(app.state.pane_title_tokens, None);
+        assert!(!app.state.pane_manual_label_first);
+    }
+
+    #[test]
+    fn reload_config_applies_and_removes_pane_border_identity_token() {
+        let mut app = test_app();
+        assert_eq!(app.state.pane_border_identity_token, None);
+
+        let config: Config = toml::from_str(
+            "[ui]\npane_border_identity_token = { token = \"$role\", fg = \"#a6e3a1\" }",
+        )
+        .unwrap();
+        let report = app.apply_live_config(&config, &[], &[], false);
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert_eq!(
+            app.state.pane_border_identity_token,
+            config.ui.pane_border_identity_token
+        );
+        assert!(app.state.pane_border_identity_token.is_some());
+
+        // An invalid [ui] section keeps the previous setting.
+        app.apply_live_config(&Config::default(), &[], &["ui".into()], false);
+        assert!(app.state.pane_border_identity_token.is_some());
+
+        app.apply_live_config(&Config::default(), &[], &[], false);
+        assert_eq!(app.state.pane_border_identity_token, None);
     }
 
     #[test]
@@ -1833,6 +2197,53 @@ mod tests {
             crate::config::HostCursorModeConfig::Native
         );
         assert!(app.state.request_client_config_reload);
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_config_applies_and_removes_pane_gap_cells() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-pane-gap-cells");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let mut app = test_app();
+        assert_eq!(app.state.pane_gap_cells, None);
+
+        std::fs::write(&path, "[ui]\npane_gap_cells = 4\n").unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert!(report.diagnostics.is_empty(), "{:?}", report.diagnostics);
+        assert_eq!(app.state.pane_spacing(), crate::ui::PaneSpacing::Cells(4));
+
+        std::fs::write(
+            &path,
+            "[ui]\npane_gap_cells = \"wide\"\npane_scrollbars = false\n",
+        )
+        .unwrap();
+        let report = app.reload_config();
+        assert_eq!(app.state.pane_gap_cells, None);
+        assert!(!app.state.pane_scrollbars, "the rest of [ui] still applies");
+        assert_eq!(
+            report.diagnostics,
+            vec![
+                "ui.pane_gap_cells must be an integer from 0 to 65535 (got \"wide\"); using pane_gaps"
+                    .to_string()
+            ]
+        );
+
+        std::fs::write(&path, "[ui]\npane_gap_cells = 0\n").unwrap();
+        app.reload_config();
+        assert_eq!(app.state.pane_spacing(), crate::ui::PaneSpacing::Cells(0));
+
+        std::fs::write(&path, "[ui]\npane_gaps = false\n").unwrap();
+        app.reload_config();
+        assert_eq!(app.state.pane_gap_cells, None);
+        assert_eq!(
+            app.state.pane_spacing(),
+            crate::ui::PaneSpacing::Legacy(false)
+        );
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -1944,6 +2355,48 @@ mod tests {
             app.state.config_diagnostic.as_deref(),
             Some("config.toml; herdr config check")
         );
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_config_applies_pane_padding_and_removal_restores_baseline() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-pane-padding");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let mut app = test_app();
+        assert_eq!(app.state.pane_padding_cells, 0);
+
+        std::fs::write(&path, "[ui]\npane_padding_cells = 2\n").unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert_eq!(app.state.pane_padding_cells, 2);
+
+        // A malformed value disables only padding; sibling [ui] keys still apply.
+        std::fs::write(
+            &path,
+            "[ui]\npane_padding_cells = \"wide\"\npane_borders = \"always\"\n",
+        )
+        .unwrap();
+        let report = app.reload_config();
+        assert_ne!(report.status, crate::config::ConfigReloadStatus::Failed);
+        assert!(report.diagnostics.iter().any(|diagnostic| diagnostic
+            == "ui.pane_padding_cells = \"wide\" is not a whole number of cells from 0 to 65535; disabling pane padding"));
+        assert_eq!(app.state.pane_padding_cells, 0);
+        assert_eq!(
+            app.state.pane_borders,
+            crate::config::PaneBordersConfig::Always
+        );
+
+        std::fs::write(&path, "[ui]\npane_padding_cells = 3\n").unwrap();
+        app.reload_config();
+        assert_eq!(app.state.pane_padding_cells, 3);
+        std::fs::write(&path, "").unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert_eq!(app.state.pane_padding_cells, 0);
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
@@ -2815,6 +3268,169 @@ mod tests {
         let response =
             app.handle_api_request_after_internal_events_drained(crate::api::schema::Request {
                 id: "req_hidden_split_size".into(),
+                method: crate::api::schema::Method::PaneSplit(
+                    crate::api::schema::PaneSplitParams {
+                        workspace_id: None,
+                        target_pane_id: Some(app.pane_info(ws_idx, root).unwrap().pane_id),
+                        direction: crate::api::schema::SplitDirection::Down,
+                        ratio: Some(0.3),
+                        cwd: None,
+                        focus: false,
+                        right_click: Default::default(),
+                        env: Default::default(),
+                    },
+                ),
+            });
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        let (_, new_pane) = app
+            .parse_pane_id(response["result"]["pane"]["pane_id"].as_str().unwrap())
+            .unwrap();
+        let spawned = size_of(&app, ws_idx, new_pane);
+        relayout(&app, ws_idx);
+        assert_eq!(size_of(&app, ws_idx, new_pane), spawned);
+
+        for (_terminal_id, runtime) in app.terminal_runtimes.drain().collect::<Vec<_>>() {
+            runtime.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn hidden_split_panes_start_at_their_size_inside_pane_gap_cells() {
+        let mut app = test_app();
+        app.state.pane_gap_cells = Some(3);
+        app.state.workspaces = vec![Workspace::test_new("visible")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        let area = Rect::new(0, 0, 120, 40);
+        crate::ui::compute_view_without_resizing_panes(
+            &mut app.state,
+            &app.terminal_runtimes,
+            area,
+        );
+
+        let size_of = |app: &App, ws_idx: usize, pane_id| {
+            app.state
+                .runtime_for_pane_in_workspace(&app.terminal_runtimes, ws_idx, pane_id)
+                .unwrap()
+                .current_size()
+        };
+        let relayout = |app: &App, ws_idx: usize| {
+            crate::ui::resize_tab_surface(
+                &app.state,
+                &app.terminal_runtimes,
+                ws_idx,
+                0,
+                area,
+                crate::kitty_graphics::HostCellSize::default(),
+            );
+        };
+        let split_right = |app: &mut App, ws_idx: usize, target| {
+            let response =
+                app.handle_api_request_after_internal_events_drained(crate::api::schema::Request {
+                    id: "req_gap_split_size".into(),
+                    method: crate::api::schema::Method::PaneSplit(
+                        crate::api::schema::PaneSplitParams {
+                            workspace_id: None,
+                            target_pane_id: Some(app.pane_info(ws_idx, target).unwrap().pane_id),
+                            direction: crate::api::schema::SplitDirection::Right,
+                            ratio: Some(0.5),
+                            cwd: None,
+                            focus: false,
+                            right_click: Default::default(),
+                            env: Default::default(),
+                        },
+                    ),
+                });
+            let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+            app.parse_pane_id(response["result"]["pane"]["pane_id"].as_str().unwrap())
+                .unwrap()
+                .1
+        };
+
+        let ws_idx = app
+            .create_workspace_with_options(std::env::temp_dir(), false)
+            .unwrap();
+        assert_eq!(app.state.active, Some(0));
+        let root = app.state.workspaces[ws_idx].tabs[0].root_pane;
+        split_right(&mut app, ws_idx, root);
+
+        // Splitting the root again puts the new pane between two neighbours, so it
+        // is a leading pane that gives up the gap cells on its right edge.
+        let placement = crate::ui::NewPanePlacement::Split {
+            ws_idx,
+            target: root,
+            direction: ratatui::layout::Direction::Horizontal,
+            ratio: 0.5,
+        };
+        let with_gap = app.state.new_pane_size(placement);
+        app.state.pane_gap_cells = None;
+        let without_gap = app.state.new_pane_size(placement);
+        app.state.pane_gap_cells = Some(3);
+        assert!(
+            with_gap.1 < without_gap.1,
+            "gap cells must shrink the spawn width: {with_gap:?} vs {without_gap:?}"
+        );
+
+        let middle = split_right(&mut app, ws_idx, root);
+        let spawned = size_of(&app, ws_idx, middle);
+        assert_eq!(spawned, with_gap);
+        relayout(&app, ws_idx);
+        assert_eq!(size_of(&app, ws_idx, middle), spawned);
+
+        for (_terminal_id, runtime) in app.terminal_runtimes.drain().collect::<Vec<_>>() {
+            runtime.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn hidden_panes_start_at_their_padded_size() {
+        let mut app = test_app();
+        app.state.pane_padding_cells = 2;
+        app.state.workspaces = vec![Workspace::test_new("visible")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        let area = Rect::new(0, 0, 120, 40);
+        crate::ui::compute_view_without_resizing_panes(
+            &mut app.state,
+            &app.terminal_runtimes,
+            area,
+        );
+
+        let size_of = |app: &App, ws_idx: usize, pane_id| {
+            app.state
+                .runtime_for_pane_in_workspace(&app.terminal_runtimes, ws_idx, pane_id)
+                .unwrap()
+                .current_size()
+        };
+        let relayout = |app: &App, ws_idx: usize| {
+            crate::ui::resize_tab_surface(
+                &app.state,
+                &app.terminal_runtimes,
+                ws_idx,
+                0,
+                area,
+                crate::kitty_graphics::HostCellSize::default(),
+            );
+        };
+
+        app.state.pane_padding_cells = 0;
+        let unpadded = app.state.new_pane_size(crate::ui::NewPanePlacement::Alone);
+        app.state.pane_padding_cells = 2;
+        let ws_idx = app
+            .create_workspace_with_options(std::env::temp_dir(), false)
+            .unwrap();
+        assert_eq!(app.state.active, Some(0));
+        let root = app.state.workspaces[ws_idx].tabs[0].root_pane;
+        let spawned = size_of(&app, ws_idx, root);
+        assert_eq!(spawned, (unpadded.0 - 4, unpadded.1 - 4));
+        relayout(&app, ws_idx);
+        assert_eq!(size_of(&app, ws_idx, root), spawned);
+
+        let response =
+            app.handle_api_request_after_internal_events_drained(crate::api::schema::Request {
+                id: "req_padded_split_size".into(),
                 method: crate::api::schema::Method::PaneSplit(
                     crate::api::schema::PaneSplitParams {
                         workspace_id: None,

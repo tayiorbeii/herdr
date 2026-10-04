@@ -275,7 +275,14 @@ You can override individual colors:
 
 ```toml
 [theme.custom]
+active_tab_fg = "#181825"
+active_tab_bg = "#89b4fa"
+pane_border_active = "#89b4fa"
+pane_border_inactive = "#6c7086"
 sidebar_bg = "#181825"
+popup_bg = "#181825"
+popup_border = "#89b4fa"
+pane_inactive_bg = "#11111b"
 active_row_bg = "#1e1e2e"
 selection_bg = "#313244"
 panel_bg = "reset"
@@ -288,7 +295,15 @@ yellow = "#f9e2af"
 
 `sidebar_bg` optionally gives the desktop sidebar its own background. When omitted, the sidebar keeps the host terminal background. `active_row_bg` changes the active Space and focused Agent row background without affecting separators or scrollbar tracks. `selection_bg` changes the Navigate-mode cursor row background in the sidebar.
 
-Color values accept hex, named colors, `rgb(r,g,b)`, or reset aliases like `reset`, `default`, `none`, and `transparent`.
+`active_tab_fg` and `active_tab_bg` independently change only the focused tab label, not inactive tabs or status segments. If omitted, the foreground follows the resolved `panel_bg` (`surface_dim` when `panel_bg` is reset), and the background follows the resolved `accent`. Reset aliases explicitly use terminal defaults; they do not mean inheritance. Custom labels keep their existing bold emphasis. These colors do not change tab bar visibility.
+
+`pane_border_active` and `pane_border_inactive` change only the pane frame and pane border title colors of the focused and unfocused panes. Tabs, popups, overlays, the sidebar and other `accent` uses are unchanged. If omitted, the focused pane follows the resolved `accent` and unfocused panes follow the resolved `overlay0`, so existing `accent` and `overlay0` overrides keep applying. Reset aliases explicitly use the terminal default foreground; they do not mean inheritance. Setting both to the same value deliberately removes the color difference between focused and unfocused panes; the focused pane title stays bold. Mode subtables inherit omitted fields from `[theme.custom]` and apply only with `auto_switch`. Live config reload applies the change, and removing an override restores the fallback.
+
+`popup_bg` and `popup_border` style terminal popups opened by popup commands or plugin panes with `placement = "popup"`. `popup_bg` paints blank popup cells and popup terminal cells that use the default background; backgrounds the program sets explicitly are kept. `popup_border` colors the popup border and its title. If omitted, the popup frame keeps the resolved `panel_bg` background and `accent` border, and popup terminal cells keep the terminal default background. Reset aliases explicitly use terminal defaults; they do not mean inheritance. Panes, tabs, overlays and other `accent` uses are unchanged.
+
+`pane_inactive_bg` optionally tints the terminal-default background of unfocused panes so the focused pane stands out. Only cells that have no explicit ANSI background change, including blank space; programs' own backgrounds, reverse video, and selections are unchanged, and a program that sets its own default background (OSC 11) keeps it. The focused pane, popups, borders, and the sidebar never change. When omitted, panes look exactly as before; reset aliases leave the terminal default.
+
+Color values accept hex (`#rgb` or `#rrggbb`), named colors, `rgb(r,g,b)`, or reset aliases like `reset`, `default`, `none`, and `transparent`.
 
 When `auto_switch` is enabled, optional light and dark subtables layer on top of the shared custom colors:
 
@@ -297,21 +312,89 @@ When `auto_switch` is enabled, optional light and dark subtables layer on top of
 accent = "#89b4fa"
 
 [theme.custom.light]
+active_tab_fg = "#eff1f5"
+active_tab_bg = "#1e66f5"
+pane_border_active = "#1e66f5"
+popup_border = "#1e66f5"
+pane_inactive_bg = "#e6e9ef"
 panel_bg = "#eff1f5"
 text = "#4c4f69"
 
 [theme.custom.dark]
+active_tab_fg = "#181825"
+active_tab_bg = "#89b4fa"
+pane_border_active = "#89b4fa"
+popup_border = "#89b4fa"
+pane_inactive_bg = "#11111b"
 panel_bg = "#1e1e2e"
 text = "#cdd6f4"
 ```
 
-The active palette is applied in this order: built-in theme, `[theme.custom]`, then `[theme.custom.light]` or `[theme.custom.dark]`. Omitting the mode subtables preserves the existing shared override behavior.
+The active palette is applied in this order: built-in theme, `[theme.custom]`, then `[theme.custom.light]` or `[theme.custom.dark]`. Omitting a mode field inherits its common value; omitting both active-tab fields restores the dynamic fallbacks above. Mode overrides are ignored when `auto_switch` is disabled. Initial load, live config reload, and host appearance changes use the same resolution. Removing an active-tab override on reload restores inheritance or fallback.
+The active palette is applied in this order: built-in theme, `[theme.custom]`, then `[theme.custom.light]` or `[theme.custom.dark]`. Omitting the mode subtables preserves the existing shared override behavior. Omitting a mode popup field inherits its common value. Initial load, live config reload, and host appearance changes use the same resolution, and removing a popup override on reload restores the default popup colors.
 
 ## UI and sidebar
 
 The sidebar is the main Herdr dashboard. Search `ui.` in the [Config reference](/docs/config-reference/) for sizing, collapsed mode, Agent panel ordering, mouse behavior, pane borders, and other presentation settings.
 
+Set `sidebar_padding_cells = N` under `[ui]` to leave N empty cells inside each expanded sidebar section on every side. The default `0` keeps the existing layout. The sidebar width, the split between spaces and agents, the divider and the collapse toggle stay where they are; section titles, lists, scrollbars, footers and their click targets move inward together. Padding shrinks only as needed to keep one usable cell in a narrow or short section, and the collapsed rail is not padded. Changes apply on config reload. A value that is not a whole number from 0 to 65535 is reported and disables only this setting.
+
 `ui.pane_borders` accepts `"auto"` (the default, borders only for split panes), `"always"` (also frame a single pane), or `"off"`. A single-pane frame requires `ui.pane_outer_borders = true`, because all its edges are outer edges. Existing boolean values remain valid: `true` means `"auto"` and `false` means `"off"`.
+
+Set `rounded_borders = true` under `[ui]` to round light corners on existing pane, popup, menu, dialog and toast frames. The default is `false`, which preserves existing appearance. This client-local preference reloads without changing terminal dimensions, padding, hit targets or border visibility. Shared T/cross junctions and double/heavy corners remain square; terminal application content is not restyled.
+
+Set `pane_border_style` under `[ui]` to choose the line style of pane frames. `pane_border_style_active` and `pane_border_style_inactive` override it for the focused pane or for the unfocused panes:
+
+```toml
+[ui]
+pane_border_style = "rounded"
+pane_border_style_active = "heavy"
+```
+
+A border cell on the focused pane's frame (the cells that get the focus color, including the shared dividers to its right and below) uses the active style; every other border cell uses the inactive style. Precedence: **state override → `pane_border_style` → `light`**. With all three keys unset, pane borders look exactly as before. An invalid value is reported and ignored, and the rest of `[ui]` still applies. Pane sizes, dividers and click targets never change.
+
+| Style | Glyphs | Notes |
+|---|---|---|
+| `light` | `┌─┐│└┘` | the default look |
+| `rounded` | `╭─╮│╰╯` | light lines with arc corners |
+| `heavy` | `┏━┓┃┗┛` | |
+| `double` | `╔═╗║╚╝` | |
+| `light-dashed-2`, `-3`, `-4` | `╌╎`, `┄┆`, `┈┊` | dashed light edges; corners and junctions are solid light |
+| `heavy-dashed-2`, `-3`, `-4` | `╍╏`, `┅┇`, `┉┋` | dashed heavy edges; corners and junctions are solid heavy |
+| `rounded-dashed-2`, `-3`, `-4` | dashed light edges, `╭╮╰╯` corners | |
+
+How pane styles stack with other settings:
+
+| Combination | Result |
+|---|---|
+| any style × focus colors (`pane_border_active` / `pane_border_inactive` theme keys) | stacks; color and glyph are independent |
+| any style × pane titles | stacks; titles sit on the top edge |
+| any style × `pane_gaps` | stacks |
+| any style × `pane_gap_cells` | stacks; `pane_gap_cells = 0` shares dividers like `pane_gaps = false`, and N ≥ 1 gives every pane its own styled frame |
+| any style × `pane_padding_cells` | stacks; padding sits inside the frame and never changes its glyphs, and `rounded` arcs stay on the frame corners |
+| pane styles × `sidebar_padding_cells` | independent; sidebar padding only moves sidebar content and never touches pane frames |
+| any style × `pane_title_tokens` | stacks; composed titles replace top-edge cells with their token colors and the focus bold, and the edge after the title keeps the pane's style, dashes included |
+| any style × `pane_border_identity_token` | stacks; the glyph comes from the pane's style and the color from identity or focus, independently. The focused pane wins both its style and its color on shared dividers |
+| any style × `pane_inactive_bg` (theme key) | stacks; the tint fills the content of unfocused panes and leaves frame glyphs and colors unchanged |
+| any style × `inactive_pane_dim_percent` | stacks; dimming fades the text of unfocused panes only, so frame glyphs and colors stay as configured |
+| rounded corners × heavy or double | Unicode has no heavy or double arcs, so heavy and double corners stay square |
+| dashed × corners and junctions | only straight runs are dashed; corners, T-junctions and crosses are solid in the matching weight |
+| different styles at a shared divider (`pane_gaps = false` or `pane_gap_cells = 0`) | the focused pane's style wins on its frame, like the focus color. Junctions use the exact mixed glyph where Unicode has one (every light/heavy mix, and light/double mixes split across the two axes); otherwise a junction with a double arm is drawn entirely double. A dashed segment shared with a solid style takes the winner's style |
+| pane styles × `rounded_borders` | `rounded_borders` still rounds light pane corners and other interface frames on the client; heavy and double corners stay square, and arcs drawn by a `rounded` style are left as they are |
+| pane styles × popups, menus and dialogs | pane styles apply only to pane frames |
+| `pane_borders = "off"` / `pane_outer_borders = false` | nothing is styled where no frame is drawn |
+
+Block-character frames (quadrant, one-eighth and proportional blocks) are planned for a later release.
+
+Set `pane_gap_cells = N` under `[ui]` to choose the blank space between split panes, in terminal cells (0 to 65535). When set it overrides `pane_gaps`: `0` shares divider borders, and `N` leaves N empty cells between neighbouring pane frames, with the frame lines in addition; with `pane_borders = "off"` the N cells separate pane contents. The space comes from the left or upper pane at each split; outer edges, the sidebar and pane interiors are unchanged. In a small window the gap shrinks only as far as needed to keep one usable row and column in each pane, and returns when the window grows. Leave it unset to keep the `pane_gaps` behavior; a malformed value is reported and ignored.
+
+Set `pane_padding_cells = 2` under `[ui]` to keep two empty cells between each pane's frame and its terminal content on every side. This works with borders off too; the padding then insets the content from the pane edge. Terminal dimensions and mouse positions follow the padded area, and the scrollbar keeps its own column. On small panes the padding shrinks so the terminal keeps at least 4 columns and 2 rows; a pane already smaller than that gets no padding on that axis. The default `0` keeps the existing layout, and the setting does not change pane gaps or the sidebar. An invalid value disables only this setting and reports a config diagnostic.
+
+Set `pane_title_tokens` under `[ui]` to build pane border titles from the same token row format as `ui.sidebar.agents.rows`, for example `pane_title_tokens = ["tab", { token = "$task", fg = "#f38ba8" }]`. Text built-ins (`workspace`, `tab`, `pane`, `agent`, `terminal_title`, `terminal_title_stripped`) and `$name` pane metadata tokens are supported; `state_icon`, `state_text` and `machine` resolve as missing in titles. Tokens update live with `herdr pane report-metadata` patches, clears and TTL expiry. Missing tokens are skipped, and when no text remains the title falls back to the reported title, then the manual label, then the agent label if `show_agent_labels_on_pane_borders` is enabled. Token colours override the border title colour; the focused pane adds bold. Titles are clipped to the pane width with `…`. Set `pane_manual_label_first = true` to make a nonempty manual pane label win over reported titles and tokens. Use `pane_borders = "always"` to show a title on a single pane.
+
+Set `pane_border_identity_token` under `[ui]` to colour the frame lines of unfocused panes from one token in the same format as a `ui.sidebar.agents.rows` entry, for example `pane_border_identity_token = { token = "$role", rules = [{ equals = "review", fg = "#f9e2af" }, { equals = "build", fg = "#a6e3a1" }] }` together with `herdr pane report-metadata <pane_id> --source ID --token role=build`. When the token resolves to text and its style has an `fg`, that colour is used for the pane's inactive lines; a missing, cleared or expired token, or one without `fg`, keeps the normal inactive border colour. The focused pane always keeps the accent colour, and a divider or junction shared only by unfocused panes uses an identity colour only when every pane that shares it has the same one. Titles and pane backgrounds are unchanged. Like the other pane border settings, it is read from the server's configuration.
+
+Set `inactive_pane_dim_percent = N` under `[ui]` (0 to 100, default `0` = off) to fade the text of unfocused panes while you type in the focused one. Herdr blends each text color toward the terminal's default background by N percent, only on screen: pane contents, copied text and the programs inside are unchanged. It applies only in normal terminal mode (prefix, copy, navigate and resize modes show panes unchanged) and never changes backgrounds, borders, the focus accent, faint text, selections, or text drawn on its own background color (including reverse video). It needs your terminal to answer color queries for its default colors and palette; colors it does not report are left as they are. `100` makes the text match the background. `inactive_pane_dim_exclude_processes = ["name", ...]` is accepted for listing foreground programs to leave undimmed, but it has no effect yet because Herdr cannot see pane foreground processes when it draws. A malformed value for either key is reported and ignored.
 
 Set `tab_bar_position = "bottom"` under `[ui]` to place the desktop tab row below the terminal panes. Prefix, Navigate, Copy, and Resize mode bars temporarily replace the bottom tab row while active. The default is `"top"`.
 

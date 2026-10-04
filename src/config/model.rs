@@ -934,6 +934,126 @@ impl<'de> Deserialize<'de> for PaneBordersConfig {
     }
 }
 
+/// `ui.pane_padding_cells`, parsed per field so a malformed value disables only
+/// pane padding instead of rejecting the whole `[ui]` section. `Err` keeps the
+/// rejected TOML value for the diagnostic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PanePaddingCellsConfig(Result<u16, String>);
+
+impl Default for PanePaddingCellsConfig {
+    fn default() -> Self {
+        Self(Ok(0))
+    }
+}
+
+impl<'de> Deserialize<'de> for PanePaddingCellsConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = toml::Value::deserialize(deserializer)?;
+        Ok(Self(match value {
+            toml::Value::Integer(cells) => u16::try_from(cells).map_err(|_| cells.to_string()),
+            other => Err(other.to_string()),
+        }))
+    }
+}
+
+/// Sidebar section padding in terminal cells. Malformed values are kept so they can be
+/// reported and disable only this override instead of invalidating `[ui]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SidebarPaddingCells(Result<u16, String>);
+
+impl Default for SidebarPaddingCells {
+    fn default() -> Self {
+        Self(Ok(0))
+    }
+}
+
+impl SidebarPaddingCells {
+    pub fn cells(&self) -> u16 {
+        self.0.as_ref().copied().unwrap_or(0)
+    }
+
+    pub fn diagnostic(&self) -> Option<String> {
+        self.0.as_ref().err().map(|raw| {
+            format!(
+                "ui.sidebar_padding_cells = {raw} is not a whole number of cells from 0 to 65535; disabling sidebar padding"
+            )
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for SidebarPaddingCells {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = toml::Value::deserialize(deserializer)?;
+        Ok(Self(match &value {
+            toml::Value::Integer(cells) => u16::try_from(*cells).map_err(|_| value.to_string()),
+            toml::Value::Float(_) | toml::Value::Boolean(_) | toml::Value::String(_) => {
+                Err(value.to_string())
+            }
+            toml::Value::Array(_) => Err("an array".into()),
+            other => Err(format!("a {}", other.type_str())),
+        }))
+    }
+}
+
+/// `ui.inactive_pane_dim_percent`, parsed per field so a malformed value disables only
+/// inactive pane dimming instead of rejecting the whole `[ui]` section. `Err` keeps the
+/// rejected TOML value for the diagnostic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InactivePaneDimPercentConfig(Result<u8, String>);
+
+impl Default for InactivePaneDimPercentConfig {
+    fn default() -> Self {
+        Self(Ok(0))
+    }
+}
+
+impl<'de> Deserialize<'de> for InactivePaneDimPercentConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = toml::Value::deserialize(deserializer)?;
+        Ok(Self(match value {
+            toml::Value::Integer(percent @ 0..=100) => Ok(percent as u8),
+            other => Err(other.to_string()),
+        }))
+    }
+}
+
+/// `ui.inactive_pane_dim_exclude_processes`, parsed per field like the percent. `Err` keeps
+/// the rejected TOML value for the diagnostic.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InactivePaneDimExcludeProcessesConfig(Result<Vec<String>, String>);
+
+impl Default for InactivePaneDimExcludeProcessesConfig {
+    fn default() -> Self {
+        Self(Ok(Vec::new()))
+    }
+}
+
+impl<'de> Deserialize<'de> for InactivePaneDimExcludeProcessesConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = toml::Value::deserialize(deserializer)?;
+        let names = match &value {
+            toml::Value::Array(items) => items
+                .iter()
+                .map(|item| item.as_str().map(str::to_owned))
+                .collect::<Option<Vec<_>>>(),
+            _ => None,
+        };
+        Ok(Self(names.ok_or_else(|| value.to_string())))
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(default)]
 pub struct UiConfig {
@@ -946,6 +1066,8 @@ pub struct UiConfig {
     pub sidebar_start_collapsed: bool,
     /// Collapsed sidebar presentation. Default: compact.
     pub sidebar_collapsed_mode: SidebarCollapsedModeConfig,
+    /// Empty cells inside each expanded sidebar section, per side. Default: 0.
+    pub sidebar_padding_cells: SidebarPaddingCells,
     /// Terminal width at or below which Herdr uses the mobile single-column layout. Default: 64.
     pub mobile_width_threshold: u16,
     /// Capture mouse input for Herdr's mouse UI. Default: true.
@@ -974,12 +1096,41 @@ pub struct UiConfig {
     pub pane_borders: PaneBordersConfig,
     /// Draw borders along the outside edge of the pane area. Default: true.
     pub pane_outer_borders: bool,
+    /// Round light corners of existing client interface frames. Default: false.
+    pub rounded_borders: bool,
     /// Draw interactive scrollbars beside terminal panes. Default: true.
     pub pane_scrollbars: bool,
     /// Keep split panes visually separated instead of sharing divider borders. Default: true.
     pub pane_gaps: bool,
+    /// Line style of every pane frame (see `PaneBorderStyle`). Kept raw so a
+    /// malformed value disables only this key. Default: unset (stock light lines).
+    pub pane_border_style: Option<toml::Value>,
+    /// Line style of the focused pane's frame; falls back to `pane_border_style`. Default: unset.
+    pub pane_border_style_active: Option<toml::Value>,
+    /// Line style of unfocused pane frames; falls back to `pane_border_style`. Default: unset.
+    pub pane_border_style_inactive: Option<toml::Value>,
+    /// Blank cells between neighbouring split panes, 0..=65535. When set it overrides
+    /// pane_gaps: 0 shares dividers, N leaves N empty cells between pane frames.
+    /// Kept raw so a malformed value disables only this override. Default: unset.
+    pub pane_gap_cells: Option<toml::Value>,
+    /// Empty terminal cells kept on each side between a pane's frame (or edge)
+    /// and its terminal content. Shrinks so the PTY keeps its minimum size. Default: 0.
+    pub pane_padding_cells: PanePaddingCellsConfig,
+    /// Blend the text of unfocused panes toward their background by this percent, 0..=100,
+    /// in terminal mode only. Default: 0 (off).
+    pub inactive_pane_dim_percent: InactivePaneDimPercentConfig,
+    /// Foreground-process basenames whose panes are never dimmed. Accepted but not applied yet:
+    /// the client has no trustworthy foreground-process name. Default: empty.
+    pub inactive_pane_dim_exclude_processes: InactivePaneDimExcludeProcessesConfig,
     /// Show agent labels in split pane borders when no manual pane label is set. Default: false.
     pub show_agent_labels_on_pane_borders: bool,
+    /// Compose pane border titles from one agent sidebar token row. Absent keeps the plain title.
+    #[serde(deserialize_with = "super::sidebar::deserialize_optional_agent_sidebar_row")]
+    pub pane_title_tokens: Option<Vec<super::AgentSidebarToken>>,
+    /// Let a nonempty manual pane label win before reported titles and tokens. Default: false.
+    pub pane_manual_label_first: bool,
+    /// Color an unfocused pane's frame lines from one agent sidebar token's explicit fg.
+    pub pane_border_identity_token: Option<super::AgentSidebarToken>,
     /// Hide the tab row when the workspace has one tab. Default: false.
     pub hide_tab_bar_when_single_tab: bool,
     /// Desktop tab row placement. Default: top.
@@ -1200,6 +1351,7 @@ impl Default for UiConfig {
             sidebar_max_width: 36,
             sidebar_start_collapsed: false,
             sidebar_collapsed_mode: SidebarCollapsedModeConfig::Compact,
+            sidebar_padding_cells: SidebarPaddingCells::default(),
             mobile_width_threshold: DEFAULT_MOBILE_WIDTH_THRESHOLD,
             mouse_capture: true,
             copy_on_select: true,
@@ -1212,9 +1364,20 @@ impl Default for UiConfig {
             prompt_new_workspace_name: false,
             pane_borders: PaneBordersConfig::Auto,
             pane_outer_borders: true,
+            rounded_borders: false,
             pane_scrollbars: true,
             pane_gaps: true,
+            pane_border_style: None,
+            pane_border_style_active: None,
+            pane_border_style_inactive: None,
+            pane_gap_cells: None,
+            pane_padding_cells: PanePaddingCellsConfig::default(),
+            inactive_pane_dim_percent: InactivePaneDimPercentConfig::default(),
+            inactive_pane_dim_exclude_processes: InactivePaneDimExcludeProcessesConfig::default(),
             show_agent_labels_on_pane_borders: false,
+            pane_title_tokens: None,
+            pane_manual_label_first: false,
+            pane_border_identity_token: None,
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
             tab_bar_right: Vec::new(),
@@ -1240,6 +1403,179 @@ impl UiConfig {
 
     pub fn right_click_passthrough_modifiers(&self) -> Option<KeyModifiers> {
         self.right_click_passthrough_modifier.modifiers()
+    }
+
+    /// The pane border style keys; malformed values count as unset.
+    pub fn pane_border_styles(&self) -> PaneBorderStyles {
+        let parse = |value: &Option<toml::Value>| {
+            value
+                .as_ref()
+                .and_then(toml::Value::as_str)
+                .and_then(PaneBorderStyle::parse)
+        };
+        PaneBorderStyles {
+            all: parse(&self.pane_border_style),
+            active: parse(&self.pane_border_style_active),
+            inactive: parse(&self.pane_border_style_inactive),
+        }
+    }
+
+    pub(crate) fn invalid_pane_border_style_diagnostics(&self) -> Vec<String> {
+        [
+            ("pane_border_style", &self.pane_border_style, "light"),
+            (
+                "pane_border_style_active",
+                &self.pane_border_style_active,
+                "pane_border_style",
+            ),
+            (
+                "pane_border_style_inactive",
+                &self.pane_border_style_inactive,
+                "pane_border_style",
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(key, value, fallback)| {
+            let value = value.as_ref()?;
+            value
+                .as_str()
+                .and_then(PaneBorderStyle::parse)
+                .is_none()
+                .then(|| {
+                    format!(
+                        "ui.{key} must be light, rounded, heavy, double, light-dashed-N, heavy-dashed-N or rounded-dashed-N with N from 2 to 4 (got {value}); using {fallback}"
+                    )
+                })
+        })
+        .collect()
+    }
+
+    /// The `pane_gap_cells` override, or `None` when it is unset or malformed.
+    pub fn pane_gap_cells(&self) -> Option<u16> {
+        self.pane_gap_cells
+            .as_ref()?
+            .as_integer()
+            .and_then(|cells| u16::try_from(cells).ok())
+    }
+
+    pub(crate) fn invalid_pane_gap_cells_diagnostic(&self) -> Option<String> {
+        let value = self.pane_gap_cells.as_ref()?;
+        self.pane_gap_cells().is_none().then(|| {
+            format!("ui.pane_gap_cells must be an integer from 0 to 65535 (got {value}); using pane_gaps")
+        })
+    }
+
+    /// Effective pane padding; a malformed setting disables padding.
+    pub fn pane_padding_cells(&self) -> u16 {
+        *self.pane_padding_cells.0.as_ref().unwrap_or(&0)
+    }
+
+    pub(crate) fn pane_padding_cells_diagnostic(&self) -> Option<String> {
+        self.pane_padding_cells.0.as_ref().err().map(|value| {
+            format!(
+                "ui.pane_padding_cells = {value} is not a whole number of cells from 0 to 65535; disabling pane padding"
+            )
+        })
+    }
+
+    /// Effective inactive pane dim percent; a malformed setting disables dimming.
+    pub fn inactive_pane_dim_percent(&self) -> u8 {
+        *self.inactive_pane_dim_percent.0.as_ref().unwrap_or(&0)
+    }
+
+    /// Configured exclude list; a malformed setting is ignored. Not consulted by rendering yet:
+    /// the client has no trustworthy foreground-process name to match against.
+    #[cfg(test)]
+    pub fn inactive_pane_dim_exclude_processes(&self) -> &[String] {
+        self.inactive_pane_dim_exclude_processes
+            .0
+            .as_deref()
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn inactive_pane_dim_diagnostics(&self) -> impl Iterator<Item = String> + '_ {
+        let percent = self.inactive_pane_dim_percent.0.as_ref().err().map(|value| {
+            format!(
+                "ui.inactive_pane_dim_percent = {value} is not a whole percent from 0 to 100; disabling inactive pane dimming"
+            )
+        });
+        let exclude = self
+            .inactive_pane_dim_exclude_processes
+            .0
+            .as_ref()
+            .err()
+            .map(|value| {
+                format!(
+                    "ui.inactive_pane_dim_exclude_processes = {value} is not a list of process names; ignoring it"
+                )
+            });
+        percent.into_iter().chain(exclude)
+    }
+}
+
+/// Dash count of a dashed pane border line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BorderDash {
+    Two,
+    Three,
+    Four,
+}
+
+/// One `ui.pane_border_style*` value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaneBorderStyle {
+    Light,
+    Rounded,
+    Heavy,
+    Double,
+    LightDashed(BorderDash),
+    HeavyDashed(BorderDash),
+    RoundedDashed(BorderDash),
+}
+
+impl PaneBorderStyle {
+    /// Every accepted name, in documentation order.
+    pub const NAMES: [(&'static str, Self); 13] = [
+        ("light", Self::Light),
+        ("rounded", Self::Rounded),
+        ("heavy", Self::Heavy),
+        ("double", Self::Double),
+        ("light-dashed-2", Self::LightDashed(BorderDash::Two)),
+        ("light-dashed-3", Self::LightDashed(BorderDash::Three)),
+        ("light-dashed-4", Self::LightDashed(BorderDash::Four)),
+        ("heavy-dashed-2", Self::HeavyDashed(BorderDash::Two)),
+        ("heavy-dashed-3", Self::HeavyDashed(BorderDash::Three)),
+        ("heavy-dashed-4", Self::HeavyDashed(BorderDash::Four)),
+        ("rounded-dashed-2", Self::RoundedDashed(BorderDash::Two)),
+        ("rounded-dashed-3", Self::RoundedDashed(BorderDash::Three)),
+        ("rounded-dashed-4", Self::RoundedDashed(BorderDash::Four)),
+    ];
+
+    pub fn parse(name: &str) -> Option<Self> {
+        Self::NAMES
+            .iter()
+            .find_map(|&(candidate, style)| (candidate == name).then_some(style))
+    }
+}
+
+/// Parsed `ui.pane_border_style`, `_active` and `_inactive`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PaneBorderStyles {
+    pub all: Option<PaneBorderStyle>,
+    pub active: Option<PaneBorderStyle>,
+    pub inactive: Option<PaneBorderStyle>,
+}
+
+impl PaneBorderStyles {
+    /// `(active, inactive)` after `state override -> pane_border_style -> light`,
+    /// or `None` when every key is unset so the stock renderer runs.
+    pub fn resolved(self) -> Option<(PaneBorderStyle, PaneBorderStyle)> {
+        if self == Self::default() {
+            return None;
+        }
+        let resolve =
+            |state: Option<PaneBorderStyle>| state.or(self.all).unwrap_or(PaneBorderStyle::Light);
+        Some((resolve(self.active), resolve(self.inactive)))
     }
 }
 
@@ -1513,12 +1849,308 @@ status_indicators = "symbols"
     }
 
     #[test]
+    fn pane_border_styles_parse_every_name_and_resolve_by_state() {
+        assert_eq!(PaneBorderStyle::NAMES.len(), 13);
+        for (name, style) in PaneBorderStyle::NAMES {
+            let config: Config =
+                toml::from_str(&format!("[ui]\npane_border_style_inactive = \"{name}\"\n"))
+                    .unwrap();
+            assert_eq!(
+                config.ui.pane_border_styles().inactive,
+                Some(style),
+                "{name}"
+            );
+            assert!(config.collect_diagnostics().is_empty(), "{name}");
+        }
+
+        use PaneBorderStyle::{Double, Heavy, Light, Rounded};
+        let styles = |all, active, inactive| PaneBorderStyles {
+            all,
+            active,
+            inactive,
+        };
+        assert_eq!(styles(None, None, None).resolved(), None);
+        assert_eq!(
+            styles(Some(Light), None, None).resolved(),
+            Some((Light, Light)),
+            "an explicit light still opts in"
+        );
+        assert_eq!(
+            styles(None, Some(Heavy), None).resolved(),
+            Some((Heavy, Light))
+        );
+        assert_eq!(
+            styles(None, None, Some(Rounded)).resolved(),
+            Some((Light, Rounded))
+        );
+        assert_eq!(
+            styles(Some(Heavy), Some(Double), None).resolved(),
+            Some((Double, Heavy))
+        );
+        assert_eq!(
+            styles(Some(Heavy), Some(Double), Some(Rounded)).resolved(),
+            Some((Double, Rounded))
+        );
+    }
+
+    #[test]
+    fn malformed_pane_border_style_reports_field_diagnostic_and_keeps_ui() {
+        for key in [
+            "pane_border_style",
+            "pane_border_style_active",
+            "pane_border_style_inactive",
+        ] {
+            for raw in [
+                "\"thick\"",
+                "\"Heavy\"",
+                "\"light-dashed-5\"",
+                "\"double-dashed-2\"",
+                "\"\"",
+                "2",
+                "true",
+                "[\"heavy\"]",
+                "{ style = \"heavy\" }",
+            ] {
+                let other = if key == "pane_border_style" {
+                    "pane_border_style_active = \"double\""
+                } else {
+                    "pane_border_style = \"heavy\""
+                };
+                let config: Config = toml::from_str(&format!(
+                    "[ui]\n{key} = {raw}\n{other}\npane_scrollbars = false\n"
+                ))
+                .unwrap_or_else(|err| panic!("{key} = {raw} must not reject [ui]: {err}"));
+                let styles = config.ui.pane_border_styles();
+                assert!(
+                    !config.ui.pane_scrollbars,
+                    "{key} = {raw}: [ui] still applies"
+                );
+                let (expected, fallback) = match key {
+                    "pane_border_style" => (
+                        PaneBorderStyles {
+                            active: Some(PaneBorderStyle::Double),
+                            ..PaneBorderStyles::default()
+                        },
+                        "light",
+                    ),
+                    _ => (
+                        PaneBorderStyles {
+                            all: Some(PaneBorderStyle::Heavy),
+                            ..PaneBorderStyles::default()
+                        },
+                        "pane_border_style",
+                    ),
+                };
+                assert_eq!(styles, expected, "{key} = {raw}: only this key is disabled");
+                let diagnostics = config.collect_diagnostics();
+                assert_eq!(diagnostics.len(), 1, "{key} = {raw}: {diagnostics:?}");
+                assert!(
+                    diagnostics[0].starts_with(&format!(
+                        "ui.{key} must be light, rounded, heavy, double, light-dashed-N, heavy-dashed-N or rounded-dashed-N with N from 2 to 4 (got "
+                    )) && diagnostics[0].ends_with(&format!("); using {fallback}")),
+                    "{key} = {raw}: {diagnostics:?}"
+                );
+                assert!(!diagnostics[0].contains('\n'));
+            }
+        }
+    }
+
+    #[test]
+    fn pane_gap_cells_parses_and_defaults_to_unset() {
+        let default_config = Config::default();
+        assert_eq!(default_config.ui.pane_gap_cells(), None);
+        assert_eq!(default_config.ui.invalid_pane_gap_cells_diagnostic(), None);
+
+        for (raw, expected) in [("0", 0), ("3", 3), ("65535", u16::MAX)] {
+            let config: Config = toml::from_str(&format!(
+                "[ui]\npane_gaps = false\npane_gap_cells = {raw}\n"
+            ))
+            .unwrap();
+            assert_eq!(config.ui.pane_gap_cells(), Some(expected));
+            assert!(
+                !config.ui.pane_gaps,
+                "the legacy key still parses beside it"
+            );
+            assert!(config.collect_diagnostics().is_empty());
+        }
+    }
+
+    #[test]
+    fn malformed_pane_gap_cells_reports_field_diagnostic_and_keeps_ui() {
+        for raw in [
+            "-1",
+            "65536",
+            "1.5",
+            "\"2\"",
+            "true",
+            "[1]",
+            "{ cells = 1 }",
+        ] {
+            let config: Config = toml::from_str(&format!(
+                "[ui]\npane_gap_cells = {raw}\npane_gaps = false\npane_scrollbars = false\n"
+            ))
+            .unwrap_or_else(|err| panic!("{raw} must not reject [ui]: {err}"));
+            assert_eq!(config.ui.pane_gap_cells(), None, "{raw}");
+            assert!(!config.ui.pane_gaps, "{raw}: other [ui] keys still apply");
+            assert!(!config.ui.pane_scrollbars, "{raw}");
+            let diagnostics = config.collect_diagnostics();
+            assert_eq!(diagnostics.len(), 1, "{raw}: {diagnostics:?}");
+            assert!(
+                diagnostics[0].starts_with("ui.pane_gap_cells must be an integer from 0 to 65535")
+                    && diagnostics[0].ends_with("; using pane_gaps"),
+                "{raw}: {diagnostics:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn pane_padding_cells_defaults_to_zero_and_parses_u16_range() {
+        let default_config = Config::default();
+        assert_eq!(default_config.ui.pane_padding_cells(), 0);
+        assert_eq!(default_config.ui.pane_padding_cells_diagnostic(), None);
+
+        for (raw, expected) in [("0", 0), ("2", 2), ("65535", u16::MAX)] {
+            let config: Config =
+                toml::from_str(&format!("[ui]\npane_padding_cells = {raw}")).unwrap();
+            assert_eq!(config.ui.pane_padding_cells(), expected, "{raw}");
+            assert_eq!(config.ui.pane_padding_cells_diagnostic(), None, "{raw}");
+        }
+    }
+
+    #[test]
+    fn pane_padding_cells_malformed_value_disables_only_padding() {
+        for raw in [
+            "-1",
+            "65536",
+            "1.5",
+            "\"2\"",
+            "true",
+            "[1]",
+            "{ cells = 1 }",
+        ] {
+            let config: Config = toml::from_str(&format!(
+                "[ui]\npane_padding_cells = {raw}\npane_gaps = false\npane_scrollbars = false\n"
+            ))
+            .unwrap_or_else(|err| panic!("{raw} rejected the whole config: {err}"));
+            assert_eq!(config.ui.pane_padding_cells(), 0, "{raw}");
+            assert!(!config.ui.pane_gaps, "{raw}: sibling key dropped");
+            assert!(!config.ui.pane_scrollbars, "{raw}: sibling key dropped");
+            let diagnostic = config
+                .ui
+                .pane_padding_cells_diagnostic()
+                .unwrap_or_else(|| panic!("{raw}: missing diagnostic"));
+            assert_eq!(
+                diagnostic,
+                format!(
+                    "ui.pane_padding_cells = {raw} is not a whole number of cells from 0 to 65535; disabling pane padding"
+                )
+            );
+            assert!(
+                config.collect_diagnostics().contains(&diagnostic),
+                "{raw}: startup diagnostics omit the field"
+            );
+        }
+    }
+
+    #[test]
+    fn inactive_pane_dim_percent_defaults_to_zero_and_parses_range() {
+        let default_config = Config::default();
+        assert_eq!(default_config.ui.inactive_pane_dim_percent(), 0);
+        assert!(default_config
+            .ui
+            .inactive_pane_dim_exclude_processes()
+            .is_empty());
+        assert_eq!(default_config.ui.inactive_pane_dim_diagnostics().count(), 0);
+
+        for (raw, expected) in [("0", 0), ("35", 35), ("100", 100)] {
+            let config: Config =
+                toml::from_str(&format!("[ui]\ninactive_pane_dim_percent = {raw}")).unwrap();
+            assert_eq!(config.ui.inactive_pane_dim_percent(), expected, "{raw}");
+            assert!(config.collect_diagnostics().is_empty(), "{raw}");
+        }
+    }
+
+    #[test]
+    fn inactive_pane_dim_percent_malformed_value_disables_only_dimming() {
+        for raw in [
+            "-1",
+            "101",
+            "1.5",
+            "\"30\"",
+            "true",
+            "[30]",
+            "{ percent = 30 }",
+        ] {
+            let config: Config = toml::from_str(&format!(
+                "[ui]\ninactive_pane_dim_percent = {raw}\npane_gaps = false\npane_scrollbars = false\n"
+            ))
+            .unwrap_or_else(|err| panic!("{raw} rejected the whole config: {err}"));
+            assert_eq!(config.ui.inactive_pane_dim_percent(), 0, "{raw}");
+            assert!(!config.ui.pane_gaps, "{raw}: sibling key dropped");
+            assert!(!config.ui.pane_scrollbars, "{raw}: sibling key dropped");
+            let expected = format!(
+                "ui.inactive_pane_dim_percent = {raw} is not a whole percent from 0 to 100; disabling inactive pane dimming"
+            );
+            assert_eq!(
+                config
+                    .ui
+                    .inactive_pane_dim_diagnostics()
+                    .collect::<Vec<_>>(),
+                vec![expected.clone()],
+                "{raw}"
+            );
+            assert!(
+                config.collect_diagnostics().contains(&expected),
+                "{raw}: startup diagnostics omit the field"
+            );
+        }
+    }
+
+    #[test]
+    fn inactive_pane_dim_exclude_processes_parses_and_reports_malformed_values() {
+        let config: Config = toml::from_str(
+            "[ui]\ninactive_pane_dim_percent = 40\ninactive_pane_dim_exclude_processes = [\"vim\", \"less\"]\n",
+        )
+        .unwrap();
+        assert_eq!(
+            config.ui.inactive_pane_dim_exclude_processes(),
+            ["vim".to_string(), "less".to_string()]
+        );
+        assert_eq!(config.ui.inactive_pane_dim_percent(), 40);
+        assert!(
+            config.collect_diagnostics().is_empty(),
+            "a valid list is accepted without a banner"
+        );
+
+        for raw in ["\"vim\"", "[\"vim\", 1]", "3", "{ name = \"vim\" }"] {
+            let config: Config = toml::from_str(&format!(
+                "[ui]\ninactive_pane_dim_exclude_processes = {raw}\ninactive_pane_dim_percent = 25\n"
+            ))
+            .unwrap_or_else(|err| panic!("{raw} rejected the whole config: {err}"));
+            assert!(
+                config.ui.inactive_pane_dim_exclude_processes().is_empty(),
+                "{raw}"
+            );
+            assert_eq!(config.ui.inactive_pane_dim_percent(), 25, "{raw}");
+            let expected = format!(
+                "ui.inactive_pane_dim_exclude_processes = {raw} is not a list of process names; ignoring it"
+            );
+            assert_eq!(config.collect_diagnostics(), vec![expected], "{raw}");
+        }
+    }
+
+    #[test]
     fn pane_appearance_defaults_and_parse() {
         let default_config = Config::default();
         assert_eq!(default_config.ui.pane_borders, PaneBordersConfig::Auto);
         assert!(default_config.ui.pane_outer_borders);
         assert!(default_config.ui.pane_scrollbars);
         assert!(default_config.ui.pane_gaps);
+        assert_eq!(
+            default_config.ui.pane_border_styles(),
+            PaneBorderStyles::default()
+        );
+        assert_eq!(default_config.ui.pane_border_styles().resolved(), None);
         assert!(!default_config.ui.show_agent_labels_on_pane_borders);
         assert!(!default_config.ui.hide_tab_bar_when_single_tab);
         assert_eq!(
@@ -1534,6 +2166,8 @@ pane_borders = "always"
 pane_outer_borders = false
 pane_scrollbars = false
 pane_gaps = true
+pane_border_style = "rounded"
+pane_border_style_active = "heavy-dashed-3"
 show_agent_labels_on_pane_borders = true
 hide_tab_bar_when_single_tab = true
 tab_bar_position = "bottom"
@@ -1551,6 +2185,14 @@ tab_bar_right_separator = " · "
         assert!(!config.ui.pane_outer_borders);
         assert!(!config.ui.pane_scrollbars);
         assert!(config.ui.pane_gaps);
+        assert_eq!(
+            config.ui.pane_border_styles(),
+            PaneBorderStyles {
+                all: Some(PaneBorderStyle::Rounded),
+                active: Some(PaneBorderStyle::HeavyDashed(BorderDash::Three)),
+                inactive: None,
+            }
+        );
         assert!(config.ui.show_agent_labels_on_pane_borders);
         assert!(config.ui.hide_tab_bar_when_single_tab);
         assert_eq!(config.ui.tab_bar_position, TabBarPositionConfig::Bottom);
@@ -1560,6 +2202,105 @@ tab_bar_right_separator = " · "
             TabBarRightEntryConfig::Hostname
         ));
         assert_eq!(config.ui.tab_bar_right_separator, " · ");
+    }
+
+    #[test]
+    fn pane_title_tokens_parse_sidebar_row_shape() {
+        use crate::config::AgentSidebarToken;
+        let default_config = Config::default();
+        assert_eq!(default_config.ui.pane_title_tokens, None);
+        assert!(!default_config.ui.pane_manual_label_first);
+
+        let config: Config = toml::from_str(
+            r##"
+[ui]
+pane_manual_label_first = true
+pane_title_tokens = ["tab", { token = "$task", fg = "#f38ba8", bold = true, dim = false }]
+"##,
+        )
+        .unwrap();
+        assert!(config.ui.pane_manual_label_first);
+        let row = config.ui.pane_title_tokens.unwrap();
+        assert_eq!(row[0], AgentSidebarToken::Tab);
+        let AgentSidebarToken::Styled {
+            token,
+            style,
+            rules,
+        } = &row[1]
+        else {
+            panic!("expected styled token");
+        };
+        assert_eq!(**token, AgentSidebarToken::Custom("task".into()));
+        assert_eq!(
+            style.fg.map(|fg| fg.ratatui()),
+            Some(ratatui::style::Color::Rgb(0xf3, 0x8b, 0xa8))
+        );
+        assert_eq!((style.bold, style.dim), (Some(true), Some(false)));
+        assert!(rules.is_empty());
+
+        let empty: Config = toml::from_str("[ui]\npane_title_tokens = []").unwrap();
+        assert_eq!(empty.ui.pane_title_tokens, Some(Vec::new()));
+    }
+
+    #[test]
+    fn pane_title_tokens_reject_invalid_tokens() {
+        for toml in [
+            "[ui]\npane_title_tokens = [\"unknown\"]",
+            "[ui]\npane_title_tokens = [\"$bad name\"]",
+            "[ui]\npane_title_tokens = [{ token = \"$task\", fg = \"red\" }]",
+            "[ui]\npane_title_tokens = \"$task\"",
+            "[ui]\npane_manual_label_first = \"yes\"",
+        ] {
+            assert!(toml::from_str::<Config>(toml).is_err(), "{toml}");
+        }
+        let too_many = format!(
+            "[ui]\npane_title_tokens = [{}]",
+            vec!["\"tab\""; 17].join(", ")
+        );
+        let error = toml::from_str::<Config>(&too_many).unwrap_err().to_string();
+        assert!(error.contains("at most 16 tokens"), "{error}");
+    }
+
+    #[test]
+    fn pane_border_identity_token_parses_single_token() {
+        use crate::config::AgentSidebarToken;
+        assert_eq!(Config::default().ui.pane_border_identity_token, None);
+
+        let plain: Config = toml::from_str("[ui]\npane_border_identity_token = \"$role\"").unwrap();
+        assert_eq!(
+            plain.ui.pane_border_identity_token,
+            Some(AgentSidebarToken::Custom("role".into()))
+        );
+
+        let styled: Config = toml::from_str(
+            r##"
+[ui]
+pane_border_identity_token = { token = "$role", fg = "#89b4fa", rules = [{ equals = "build", fg = "#a6e3a1" }] }
+"##,
+        )
+        .unwrap();
+        let Some(AgentSidebarToken::Styled {
+            token,
+            style,
+            rules,
+        }) = styled.ui.pane_border_identity_token
+        else {
+            panic!("expected styled token");
+        };
+        assert_eq!(*token, AgentSidebarToken::Custom("role".into()));
+        assert_eq!(
+            style.fg.map(|fg| fg.ratatui()),
+            Some(ratatui::style::Color::Rgb(0x89, 0xb4, 0xfa))
+        );
+        assert_eq!(rules.len(), 1);
+
+        for toml in [
+            "[ui]\npane_border_identity_token = \"unknown\"",
+            "[ui]\npane_border_identity_token = { token = \"$role\", fg = \"reset\" }",
+            "[ui]\npane_border_identity_token = { token = \"$role\", fg = \"#12\" }",
+        ] {
+            assert!(toml::from_str::<Config>(toml).is_err(), "{toml}");
+        }
     }
 
     #[test]
@@ -1854,6 +2595,48 @@ mouse_scroll_lines = 1
 "#;
         let config: Config = toml::from_str(toml).unwrap();
         assert_eq!(config.ui.mouse_scroll_lines(), 1);
+    }
+
+    #[test]
+    fn sidebar_padding_cells_defaults_to_zero_and_parses() {
+        let default_config = Config::default();
+        assert_eq!(default_config.ui.sidebar_padding_cells.cells(), 0);
+        assert_eq!(default_config.ui.sidebar_padding_cells.diagnostic(), None);
+
+        for (raw, cells) in [("0", 0), ("2", 2), ("65535", u16::MAX)] {
+            let config: Config =
+                toml::from_str(&format!("[ui]\nsidebar_padding_cells = {raw}\n")).unwrap();
+            assert_eq!(config.ui.sidebar_padding_cells.cells(), cells);
+            assert!(config.collect_diagnostics().is_empty());
+        }
+    }
+
+    #[test]
+    fn sidebar_padding_cells_malformed_value_disables_only_that_field() {
+        for (raw, shown) in [
+            ("-1", "-1"),
+            ("65536", "65536"),
+            ("1.5", "1.5"),
+            ("true", "true"),
+            ("\"2\"", "\"2\""),
+            ("[1]", "an array"),
+            ("{ cells = 1 }", "a table"),
+        ] {
+            let config: Config = toml::from_str(&format!(
+                "[ui]\nsidebar_padding_cells = {raw}\nsidebar_width = 30\n"
+            ))
+            .unwrap_or_else(|err| panic!("{raw} must not invalidate [ui]: {err}"));
+            assert_eq!(config.ui.sidebar_padding_cells.cells(), 0, "{raw}");
+            assert_eq!(config.ui.sidebar_width, 30, "{raw}");
+            let expected = format!(
+                "ui.sidebar_padding_cells = {shown} is not a whole number of cells from 0 to 65535; disabling sidebar padding"
+            );
+            assert_eq!(
+                config.ui.sidebar_padding_cells.diagnostic().as_deref(),
+                Some(expected.as_str())
+            );
+            assert_eq!(config.collect_diagnostics(), vec![expected]);
+        }
     }
 
     #[test]

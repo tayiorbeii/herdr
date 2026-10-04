@@ -59,6 +59,7 @@ pub(crate) fn collect(
             target,
             pane_infos,
             split_borders,
+            pane_gaps: crate::ui::PaneGaps::default(),
         },
         popup_content_size,
         cell_size,

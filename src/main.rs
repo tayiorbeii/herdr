@@ -84,7 +84,21 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Override individual color tokens on top of the base theme.
 # Accepts: hex (#rrggbb), named colors, rgb(r,g,b), or panel_bg = "reset"
 # [theme.custom]
+# Focused tab only; omitted fg follows panel contrast, omitted bg follows accent.
+# Reset aliases use terminal defaults rather than inheriting a color.
+# active_tab_fg = "#181825"
+# active_tab_bg = "#89b4fa"
+# Pane frame and title only; omitted active follows accent, omitted inactive follows
+# overlay0. Equal values remove the color-only focus cue (the focused title stays bold).
+# pane_border_active = "#89b4fa"
+# pane_border_inactive = "#6c7086"
+# Terminal popups only; omitted bg keeps panel_bg chrome and the terminal default
+# inside the popup, omitted border follows accent. Explicit program backgrounds are kept.
+# popup_bg = "#181825"
+# popup_border = "#89b4fa"
 # sidebar_bg = "#181825"
+# Unfocused panes only; tints terminal-default backgrounds, never program colors.
+# pane_inactive_bg = "#11111b"
 # active_row_bg = "#1e1e2e"
 # selection_bg = "#313244"
 # panel_bg = "reset"
@@ -94,10 +108,20 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 
 # Layer appearance-specific overrides on top when auto_switch is enabled.
 # [theme.custom.light]
+# active_tab_fg = "#eff1f5"
+# active_tab_bg = "#1e66f5"
+# pane_border_active = "#1e66f5"
+# popup_border = "#1e66f5"
+# pane_inactive_bg = "#e6e9ef"
 # panel_bg = "#eff1f5"
 # text = "#4c4f69"
 #
 # [theme.custom.dark]
+# active_tab_fg = "#181825"
+# active_tab_bg = "#89b4fa"
+# pane_border_active = "#89b4fa"
+# popup_border = "#89b4fa"
+# pane_inactive_bg = "#11111b"
 # panel_bg = "#1e1e2e"
 # text = "#cdd6f4"
 
@@ -245,6 +269,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Collapsed sidebar presentation: "compact" keeps the narrow status rail, "hidden" uses zero width.
 # sidebar_collapsed_mode = "compact"
 
+# Empty cells inside each expanded sidebar section, on every side (0-65535).
+# Shrinks only to keep one usable cell; the sidebar width does not change.
+# sidebar_padding_cells = 0
+
 # Terminal width at or below which Herdr uses the mobile single-column layout.
 # Increase this for foldables, tablets, or wide phone terminals.
 # mobile_width_threshold = 64
@@ -296,6 +324,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Disable for tmux-style internal splitters without an outside frame.
 # pane_outer_borders = true
 
+# Opt in to rounded light corners on existing interface frames; no geometry changes.
+# Shared junctions and double/heavy borders retain their square glyphs.
+# rounded_borders = false
+
 # Draw interactive scrollbars beside terminal panes.
 # Set false to reclaim the scrollbar column and keep it out of terminal-native selections.
 # pane_scrollbars = true
@@ -303,8 +335,44 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Keep split panes visually separated instead of sharing divider borders.
 # pane_gaps = true
 
+# Pane frame line style: light, rounded, heavy, double, light-dashed-2/3/4,
+# heavy-dashed-2/3/4 or rounded-dashed-2/3/4. pane_border_style applies to every pane;
+# the _active and _inactive keys override it for the focused or unfocused panes.
+# Unset keeps the stock light lines. Geometry and shared dividers are unchanged.
+# pane_border_style = "light"
+# pane_border_style_active = "heavy"
+# pane_border_style_inactive = "rounded"
+
+# Blank cells between neighbouring split panes (0-65535); overrides pane_gaps when set.
+# 0 shares dividers; N leaves N empty cells between pane frames (frame lines are extra).
+# Small windows shrink the gap only as needed to keep every pane usable.
+# pane_gap_cells = 1
+
+# Empty cells between each pane's frame (or edge) and its terminal content.
+# Shrinks on small panes so the terminal keeps 4 columns and 2 rows; the scrollbar keeps its column.
+# pane_padding_cells = 0
+
+# Fade the text of unfocused panes in terminal mode: blend text colors toward the
+# terminal default background by this percent (0-100, 0 = off). Display only; backgrounds,
+# borders, faint text, selections and pane contents are unchanged.
+# inactive_pane_dim_percent = 30
+# Foreground programs to leave undimmed. Accepted but not applied yet: herdr cannot see
+# pane foreground processes when it draws.
+# inactive_pane_dim_exclude_processes = []
+
 # Show detected/reported agent labels in split pane borders when no manual pane name is set.
 # show_agent_labels_on_pane_borders = false
+
+# Compose pane border titles from one token row, written like one entry of
+# ui.sidebar.agents.rows. Missing tokens fall back to the plain title.
+# pane_title_tokens = ["tab", { token = "$task", fg = "#f38ba8" }]
+
+# Let a nonempty manual pane label win over reported titles and title tokens.
+# pane_manual_label_first = false
+
+# Color unfocused pane frame lines from one token's fg, written like one entry of a
+# ui.sidebar.agents.rows row. Missing tokens or tokens without fg keep the default color.
+# pane_border_identity_token = { token = "$role", fg = "#89b4fa" }
 
 # Hide the tab row when a workspace has exactly one tab.
 # New tabs can still be created with the configured keybinding.

@@ -121,6 +121,9 @@ impl ClientShellConfig {
             mobile_width_threshold: config.ui.mobile_width_threshold,
             tab_bar_position: config.ui.tab_bar_position,
             hide_tab_bar_when_single_tab: config.ui.hide_tab_bar_when_single_tab,
+            rounded_borders: config.ui.rounded_borders,
+            sidebar_padding_cells: config.ui.sidebar_padding_cells.cells(),
+            inactive_pane_dim_percent: config.ui.inactive_pane_dim_percent(),
             spaces: config.ui.sidebar.spaces.clone(),
             agents: config.ui.sidebar.agents.clone(),
             agent_panel_sort: config.ui.agent_panel_sort,
@@ -316,6 +319,8 @@ impl ClientShellConfig {
             } else {
                 let ui = &config.ui;
                 diagnostics.extend(ui.sound.diagnostics());
+                diagnostics.extend(ui.sidebar_padding_cells.diagnostic());
+                diagnostics.extend(ui.inactive_pane_dim_diagnostics());
                 self.sidebar_width = ui.sidebar_width;
                 self.sidebar_min_width = ui.sidebar_min_width;
                 self.sidebar_max_width = ui.sidebar_max_width;
@@ -323,6 +328,9 @@ impl ClientShellConfig {
                 self.mobile_width_threshold = ui.mobile_width_threshold;
                 self.tab_bar_position = ui.tab_bar_position;
                 self.hide_tab_bar_when_single_tab = ui.hide_tab_bar_when_single_tab;
+                self.rounded_borders = ui.rounded_borders;
+                self.sidebar_padding_cells = ui.sidebar_padding_cells.cells();
+                self.inactive_pane_dim_percent = ui.inactive_pane_dim_percent();
                 self.spaces = ui.sidebar.spaces.clone();
                 self.agents = ui.sidebar.agents.clone();
                 self.agent_panel_sort = ui.agent_panel_sort;
@@ -449,6 +457,365 @@ mod tests {
     use crossterm::event::{KeyCode, KeyModifiers};
 
     use super::*;
+
+    #[test]
+    fn active_tab_colors_do_not_change_tab_bar_visibility() {
+        let mut config = Config::default();
+        config.ui.hide_tab_bar_when_single_tab = true;
+        config.ui.mobile_width_threshold = 40;
+        let baseline = ClientShellConfig::from_config(&config);
+        config.theme.custom = Some(crate::config::CustomThemeColors {
+            active_tab_fg: Some("red".into()),
+            active_tab_bg: Some("blue".into()),
+            ..Default::default()
+        });
+        let overridden = ClientShellConfig::from_config(&config);
+        for (cols, rows, tabs) in [(120, 20, 1), (120, 20, 2), (30, 20, 2), (120, 1, 2)] {
+            let before = baseline.layout(cols, rows, false, tabs, 26);
+            let after = overridden.layout(cols, rows, false, tabs, 26);
+            assert_eq!(before.tab_bar, after.tab_bar);
+            assert_eq!(before.pane_surface, after.pane_surface);
+            if tabs == 1 || cols == 30 || rows == 1 {
+                assert_eq!(after.tab_bar.height, 0);
+            }
+        }
+    }
+
+    #[test]
+    fn active_tab_colors_survive_appearance_changes_and_reload_removal() {
+        use crate::terminal_theme::HostAppearance;
+        use ratatui::style::Color;
+
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "herdr-active-tab-reload-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let original = std::env::var_os(crate::config::CONFIG_PATH_ENV_VAR);
+        std::fs::write(
+            &path,
+            r#"
+[theme]
+name = "terminal"
+auto_switch = true
+[theme.custom]
+active_tab_fg = "blue"
+[theme.custom.light]
+active_tab_bg = "green"
+[theme.custom.dark]
+active_tab_fg = "reset"
+"#,
+        )
+        .unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let loaded = crate::config::load_live_config().unwrap();
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&loaded.config));
+        assert_eq!(state.config.palette.active_tab_fg, Some(Color::Reset));
+        assert_eq!(state.config.palette.active_tab_bg, None);
+        state.handle_raw_events(vec![
+            crate::raw_input::RawInputEvent::HostColorSchemeChanged(HostAppearance::Light),
+        ]);
+        assert_eq!(state.config.palette.active_tab_fg, Some(Color::Blue));
+        assert_eq!(state.config.palette.active_tab_bg, Some(Color::Green));
+
+        std::fs::write(
+            &path,
+            r#"
+[theme]
+name = "terminal"
+auto_switch = true
+[theme.custom]
+active_tab_bg = "yellow"
+[theme.custom.light]
+active_tab_fg = "default"
+"#,
+        )
+        .unwrap();
+        state.reload_client_config();
+        assert_eq!(state.config.palette.active_tab_fg, Some(Color::Reset));
+        assert_eq!(state.config.palette.active_tab_bg, Some(Color::Yellow));
+        assert_eq!(state.host_appearance, Some(HostAppearance::Light));
+        state.handle_raw_events(vec![
+            crate::raw_input::RawInputEvent::HostColorSchemeChanged(HostAppearance::Dark),
+        ]);
+        assert_eq!(state.config.palette.active_tab_fg, None);
+        assert_eq!(state.config.palette.active_tab_bg, Some(Color::Yellow));
+
+        std::fs::write(
+            &path,
+            "[ui]\naccent = 'red'\n[theme]\nname = 'terminal'\nauto_switch = true\n",
+        )
+        .unwrap();
+        state.reload_client_config();
+        assert_eq!(state.config.palette.active_tab_fg, None);
+        assert_eq!(state.config.palette.active_tab_bg, None);
+        assert_eq!(state.config.palette.accent, Color::Red);
+        assert!(state.local_config_diagnostic.is_none());
+        if let Some(original) = original {
+            std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, original);
+        } else {
+            std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn rounded_borders_load_reload_and_remove_without_geometry_changes() {
+        let default = Config::default();
+        let mut shell = ClientShellConfig::from_config(&default);
+        assert!(!shell.rounded_borders);
+        let baseline = shell.initial_surface_size(120, 40);
+        let enabled: Config = toml::from_str("[ui]\nrounded_borders = true\n").unwrap();
+        assert!(ClientShellConfig::from_config(&enabled).rounded_borders);
+        assert!(shell.apply_live_config(&enabled, &[], &[]).is_empty());
+        assert!(shell.rounded_borders);
+        assert_eq!(shell.initial_surface_size(120, 40), baseline);
+        assert!(shell.apply_live_config(&default, &[], &[]).is_empty());
+        assert!(!shell.rounded_borders);
+        assert_eq!(shell.initial_surface_size(120, 40), baseline);
+    }
+
+    #[test]
+    fn rounded_borders_invalid_ui_keeps_existing_client_preference() {
+        let mut enabled = Config::default();
+        enabled.ui.rounded_borders = true;
+        let mut shell = ClientShellConfig::from_config(&enabled);
+        shell.apply_live_config(&Config::default(), &[], &["ui".into()]);
+        assert!(shell.rounded_borders);
+        let mut invalid_bounds = Config::default();
+        invalid_bounds.ui.sidebar_min_width = 80;
+        invalid_bounds.ui.sidebar_max_width = 20;
+        assert!(!shell
+            .apply_live_config(&invalid_bounds, &[], &[])
+            .is_empty());
+        assert!(shell.rounded_borders);
+    }
+
+    #[test]
+    fn popup_colors_survive_appearance_changes_and_reload_removal() {
+        use crate::terminal_theme::HostAppearance;
+        use ratatui::style::Color;
+
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "herdr-popup-colors-reload-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let original = std::env::var_os(crate::config::CONFIG_PATH_ENV_VAR);
+        std::fs::write(
+            &path,
+            r#"
+[theme]
+name = "terminal"
+auto_switch = true
+[theme.custom]
+popup_bg = "blue"
+[theme.custom.light]
+popup_border = "green"
+[theme.custom.dark]
+popup_bg = "reset"
+"#,
+        )
+        .unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let loaded = crate::config::load_live_config().unwrap();
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&loaded.config));
+        assert_eq!(state.config.palette.popup_bg, Some(Color::Reset));
+        assert_eq!(state.config.palette.popup_border, None);
+        state.handle_raw_events(vec![
+            crate::raw_input::RawInputEvent::HostColorSchemeChanged(HostAppearance::Light),
+        ]);
+        assert_eq!(state.config.palette.popup_bg, Some(Color::Blue));
+        assert_eq!(state.config.palette.popup_border, Some(Color::Green));
+
+        std::fs::write(
+            &path,
+            r#"
+[theme]
+name = "terminal"
+auto_switch = true
+[theme.custom]
+popup_border = "yellow"
+[theme.custom.light]
+popup_bg = "default"
+"#,
+        )
+        .unwrap();
+        state.reload_client_config();
+        assert_eq!(state.config.palette.popup_bg, Some(Color::Reset));
+        assert_eq!(state.config.palette.popup_border, Some(Color::Yellow));
+        state.handle_raw_events(vec![
+            crate::raw_input::RawInputEvent::HostColorSchemeChanged(HostAppearance::Dark),
+        ]);
+        assert_eq!(state.config.palette.popup_bg, None);
+        assert_eq!(state.config.palette.popup_border, Some(Color::Yellow));
+
+        std::fs::write(&path, "[theme]\nname = 'terminal'\nauto_switch = true\n").unwrap();
+        state.reload_client_config();
+        assert_eq!(state.config.palette.popup_bg, None);
+        assert_eq!(state.config.palette.popup_border, None);
+        assert!(state.local_config_diagnostic.is_none());
+        if let Some(original) = original {
+            std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, original);
+        } else {
+            std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn sidebar_padding_loads_reloads_and_removes_without_layout_changes() {
+        let default = Config::default();
+        let mut shell = ClientShellConfig::from_config(&default);
+        assert_eq!(shell.sidebar_padding_cells, 0);
+        let baseline = shell.initial_surface_size(120, 40);
+        let padded: Config = toml::from_str("[ui]\nsidebar_padding_cells = 2\n").unwrap();
+        assert_eq!(
+            ClientShellConfig::from_config(&padded).sidebar_padding_cells,
+            2
+        );
+        assert!(shell.apply_live_config(&padded, &[], &[]).is_empty());
+        assert_eq!(shell.sidebar_padding_cells, 2);
+        assert_eq!(shell.initial_surface_size(120, 40), baseline);
+        assert!(shell.apply_live_config(&default, &[], &[]).is_empty());
+        assert_eq!(shell.sidebar_padding_cells, 0);
+        assert_eq!(shell.initial_surface_size(120, 40), baseline);
+    }
+
+    #[test]
+    fn sidebar_padding_malformed_reload_reports_field_and_applies_rest_of_ui() {
+        let padded: Config = toml::from_str("[ui]\nsidebar_padding_cells = 3\n").unwrap();
+        let mut shell = ClientShellConfig::from_config(&padded);
+        let malformed: Config =
+            toml::from_str("[ui]\nsidebar_padding_cells = \"wide\"\nsidebar_width = 31\n").unwrap();
+        let diagnostics = shell.apply_live_config(&malformed, &[], &[]);
+        assert_eq!(
+            diagnostics,
+            vec![
+                "ui.sidebar_padding_cells = \"wide\" is not a whole number of cells from 0 to 65535; disabling sidebar padding"
+                    .to_string()
+            ]
+        );
+        assert_eq!(shell.sidebar_padding_cells, 0);
+        assert_eq!(shell.sidebar_width, 31);
+
+        shell.apply_live_config(&padded, &[], &[]);
+        shell.apply_live_config(&Config::default(), &[], &["ui".into()]);
+        assert_eq!(
+            shell.sidebar_padding_cells, 3,
+            "an invalid [ui] keeps the preference"
+        );
+    }
+
+    #[test]
+    fn pane_inactive_bg_survives_appearance_changes_and_reload_removal() {
+        use crate::terminal_theme::HostAppearance;
+        use ratatui::style::Color;
+
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let path = std::env::temp_dir().join(format!(
+            "herdr-pane-inactive-bg-reload-{}-{}.toml",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let original = std::env::var_os(crate::config::CONFIG_PATH_ENV_VAR);
+        std::fs::write(
+            &path,
+            r#"
+[theme]
+name = "terminal"
+auto_switch = true
+[theme.custom]
+pane_inactive_bg = "blue"
+[theme.custom.light]
+pane_inactive_bg = "green"
+[theme.custom.dark]
+pane_inactive_bg = "reset"
+"#,
+        )
+        .unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let loaded = crate::config::load_live_config().unwrap();
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&loaded.config));
+        assert_eq!(state.config.palette.pane_inactive_bg, Some(Color::Reset));
+        state.handle_raw_events(vec![
+            crate::raw_input::RawInputEvent::HostColorSchemeChanged(HostAppearance::Light),
+        ]);
+        assert_eq!(state.config.palette.pane_inactive_bg, Some(Color::Green));
+
+        std::fs::write(
+            &path,
+            "[theme]\nname = 'terminal'\nauto_switch = true\n[theme.custom]\npane_inactive_bg = 'yellow'\n",
+        )
+        .unwrap();
+        state.reload_client_config();
+        assert_eq!(state.config.palette.pane_inactive_bg, Some(Color::Yellow));
+        state.handle_raw_events(vec![
+            crate::raw_input::RawInputEvent::HostColorSchemeChanged(HostAppearance::Dark),
+        ]);
+        assert_eq!(state.config.palette.pane_inactive_bg, Some(Color::Yellow));
+
+        std::fs::write(&path, "[theme]\nname = 'terminal'\nauto_switch = true\n").unwrap();
+        state.reload_client_config();
+        assert_eq!(state.config.palette.pane_inactive_bg, None);
+        assert!(state.local_config_diagnostic.is_none());
+        if let Some(original) = original {
+            std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, original);
+        } else {
+            std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        }
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn inactive_pane_dim_loads_reloads_and_removes() {
+        let default = Config::default();
+        let mut shell = ClientShellConfig::from_config(&default);
+        assert_eq!(shell.inactive_pane_dim_percent, 0);
+        let enabled: Config = toml::from_str("[ui]\ninactive_pane_dim_percent = 35\n").unwrap();
+        assert_eq!(
+            ClientShellConfig::from_config(&enabled).inactive_pane_dim_percent,
+            35
+        );
+        assert!(shell.apply_live_config(&enabled, &[], &[]).is_empty());
+        assert_eq!(shell.inactive_pane_dim_percent, 35);
+
+        let malformed: Config =
+            toml::from_str("[ui]\ninactive_pane_dim_percent = \"35\"\n").unwrap();
+        assert_eq!(
+            shell.apply_live_config(&malformed, &[], &[]),
+            vec![
+                "ui.inactive_pane_dim_percent = \"35\" is not a whole percent from 0 to 100; disabling inactive pane dimming"
+                    .to_string()
+            ]
+        );
+        assert_eq!(shell.inactive_pane_dim_percent, 0);
+
+        assert!(shell.apply_live_config(&enabled, &[], &[]).is_empty());
+        assert!(shell.apply_live_config(&default, &[], &[]).is_empty());
+        assert_eq!(
+            shell.inactive_pane_dim_percent, 0,
+            "removal restores baseline"
+        );
+
+        shell.apply_live_config(&enabled, &[], &[]);
+        shell.apply_live_config(&default, &[], &["ui".into()]);
+        assert_eq!(
+            shell.inactive_pane_dim_percent, 35,
+            "an invalid [ui] section keeps the current preference"
+        );
+    }
 
     #[test]
     fn live_reload_applies_client_owned_sections() {

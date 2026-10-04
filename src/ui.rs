@@ -19,8 +19,9 @@ pub(crate) use self::onboarding::{
 pub(crate) use self::panes::popup_pane_rects;
 use self::panes::resize_popup_pane;
 pub(crate) use self::panes::{
-    apply_pane_chrome, new_layout_terminal_sizes, new_pane_terminal_size, pane_inner_rect,
-    pane_is_scrolled_back, render_selection_highlight, NewPanePlacement,
+    apply_pane_spacing, new_layout_terminal_sizes, new_pane_terminal_size, pad_pane_content,
+    pane_inner_rect, pane_is_scrolled_back, render_selection_highlight, NewPanePlacement, PaneGaps,
+    PaneSpacing,
 };
 pub(crate) use self::release_notes::{
     product_announcement_display_lines, product_announcement_scroll_metrics,
@@ -33,9 +34,9 @@ pub(crate) use self::scrollbar::{
     scrollbar_thumb_grab_offset,
 };
 pub(crate) use self::sidebar::{
-    agent_panel_entries_from, expanded_sidebar_sections, resolved_token_spans, sidebar_agent_rows,
-    sidebar_section_divider_rect, sidebar_space_rows, AgentPanelEntry, AgentTokenContext,
-    ResolvedToken, ResolvedTokenKind, SpaceTokenContext,
+    agent_panel_entries_from, expanded_sidebar_sections, inset_sidebar_section,
+    resolved_token_spans, sidebar_agent_rows, sidebar_section_divider_rect, sidebar_space_rows,
+    AgentPanelEntry, AgentTokenContext, ResolvedToken, ResolvedTokenKind, SpaceTokenContext,
 };
 use self::status::copy_feedback_rect;
 pub(crate) use self::status::{render_config_diagnostic_buffer, render_copy_feedback_buffer};
@@ -44,7 +45,10 @@ pub(crate) use self::tab_surface::{
     tab_surface_cursor, tab_surface_hyperlinks, TabSurfaceLayout, TabSurfaceTarget, TabSurfaceView,
 };
 pub(crate) use self::text::truncate_end;
-pub(crate) use self::widgets::{centered_popup_rect, modal_stack_areas};
+pub(crate) use self::widgets::{
+    centered_popup_rect, interface_border_type, modal_stack_areas, round_buffer_corners,
+    rounded_light_corner,
+};
 
 use crate::app::AppState;
 use crate::terminal::TerminalRuntimeRegistry;

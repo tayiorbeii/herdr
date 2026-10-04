@@ -6314,6 +6314,38 @@ mod tests {
     }
 
     #[test]
+    fn render_reports_default_background_as_reset_and_explicit_or_reverse_as_concrete() {
+        let (tx, _rx) = mpsc::channel(4);
+        let terminal = crate::ghostty::Terminal::new(20, 5, 0).unwrap();
+        let pane = GhosttyPaneTerminal::new(terminal, tx).unwrap();
+        {
+            let mut core = pane.core.lock().unwrap();
+            core.terminal
+                .write(b"\x1b[41mA\x1b[49mB\x1b[48;2;1;2;3mC\x1b[0m\x1b[7mD\x1b[0mE");
+        }
+
+        let backend = ratatui::backend::TestBackend::new(20, 5);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        terminal
+            .draw(|frame| pane.render(frame, Rect::new(0, 0, 20, 5), false))
+            .unwrap();
+
+        let buffer = terminal.backend().buffer();
+        let bg = |x: u16, y: u16| buffer[(x, y)].style().bg;
+        assert_eq!(bg(0, 0), Some(Color::Indexed(1)));
+        assert_eq!(bg(1, 0), Some(Color::Reset));
+        assert_eq!(bg(2, 0), Some(Color::Rgb(1, 2, 3)));
+        assert!(
+            matches!(bg(3, 0), Some(Color::Rgb(..))),
+            "reverse video resolves a concrete background: {:?}",
+            bg(3, 0)
+        );
+        assert_eq!(bg(4, 0), Some(Color::Reset));
+        assert_eq!(bg(5, 0), Some(Color::Reset), "blank cell");
+        assert_eq!(bg(0, 4), Some(Color::Reset), "unwritten row");
+    }
+
+    #[test]
     fn render_preserves_palette_background_fill_cells() {
         let (tx, _rx) = mpsc::channel(4);
         let terminal = crate::ghostty::Terminal::new(20, 5, 0).unwrap();

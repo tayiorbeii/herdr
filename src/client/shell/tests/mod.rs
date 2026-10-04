@@ -252,11 +252,14 @@ mod copy;
 mod endpoint_requests;
 mod endpoints;
 mod graphics;
+mod inactive_dim;
+mod inactive_pane_bg;
 #[path = "input.rs"]
 mod input_domain;
 mod keybindings_settings;
 mod link_hover;
 mod mobile;
 mod mouse_selection;
+mod popup_colors;
 mod popup_focus_projection;
 mod startup_overlays;

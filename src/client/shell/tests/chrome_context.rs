@@ -1,5 +1,134 @@
 use super::*;
 
+fn render_tab_color_test(
+    snapshot: &ClientShellSnapshot,
+    config: &ClientShellConfig,
+    width: u16,
+    scroll: usize,
+) -> (Buffer, ShellHitMap, usize) {
+    let area = Rect::new(0, 0, width, 1);
+    let mut buffer = Buffer::empty(area);
+    let mut hits = ShellHitMap::default();
+    let mut scroll = scroll;
+    let mut reveal = false;
+    render::render_tab_bar(
+        &mut buffer,
+        area,
+        snapshot,
+        config,
+        &mut scroll,
+        &mut reveal,
+        Some(1),
+        &mut hits,
+    );
+    (buffer, hits, scroll)
+}
+
+#[test]
+fn active_tab_colors_resolve_independently_and_keep_label_emphasis() {
+    use ratatui::style::Color;
+
+    let mut projected = snapshot();
+    let mut config = ClientShellConfig::from_config(&Config::default());
+    for name in crate::config::THEME_NAMES {
+        for custom_label in [false, true] {
+            projected.tabs[0].custom_label = custom_label;
+            for (fg, bg) in [
+                (None, None),
+                (Some(Color::Red), None),
+                (None, Some(Color::Green)),
+                (Some(Color::Red), Some(Color::Green)),
+                (Some(Color::Reset), None),
+                (None, Some(Color::Reset)),
+                (Some(Color::Reset), Some(Color::Reset)),
+            ] {
+                config.palette = Palette::from_name(name).unwrap();
+                config.palette.active_tab_fg = fg;
+                config.palette.active_tab_bg = bg;
+                // Fallbacks follow the final palette, not the built-in values.
+                config.palette.accent = Color::Yellow;
+                config.palette.surface_dim = Color::Magenta;
+                let expected_fg = fg.unwrap_or_else(|| {
+                    if config.palette.panel_bg == Color::Reset {
+                        config.palette.surface_dim
+                    } else {
+                        config.palette.panel_bg
+                    }
+                });
+                let (buffer, hits, _) = render_tab_color_test(&projected, &config, 120, 0);
+                let rect = hits.tabs[0].0;
+                for x in rect.x..rect.right() {
+                    let cell = &buffer[(x, rect.y)];
+                    assert_eq!(cell.fg, expected_fg, "theme: {name}");
+                    assert_eq!(cell.bg, bg.unwrap_or(Color::Yellow), "theme: {name}");
+                    assert_eq!(cell.modifier.contains(Modifier::BOLD), custom_label);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn active_tab_colors_leave_inactive_status_and_hit_geometry_unchanged() {
+    use ratatui::style::Color;
+
+    let mut projected = snapshot();
+    projected.tabs.extend((2..=8).map(|number| ClientShellTab {
+        tab_id: format!("tab_{number}"),
+        workspace_id: "ws_1".into(),
+        number,
+        label: format!("tab-{number}"),
+        custom_label: number % 2 == 0,
+        zoomed: false,
+        focused: false,
+        agent_status: AgentStatus::Working,
+    }));
+    projected.tab_bar_right = vec![
+        crate::protocol::ClientShellTabStatusSegment {
+            text: "ZOOM".into(),
+            accent: true,
+        },
+        crate::protocol::ClientShellTabStatusSegment {
+            text: "host".into(),
+            accent: false,
+        },
+    ];
+    let baseline = ClientShellConfig::from_config(&Config::default());
+    let mut overridden = ClientShellConfig::from_config(&Config::default());
+    overridden.palette.active_tab_fg = Some(Color::Reset);
+    overridden.palette.active_tab_bg = Some(Color::Red);
+    for width in [120, 55, 22] {
+        for scroll in [0, 2] {
+            let (before, before_hits, before_scroll) =
+                render_tab_color_test(&projected, &baseline, width, scroll);
+            let (after, after_hits, after_scroll) =
+                render_tab_color_test(&projected, &overridden, width, scroll);
+            assert_eq!(before_hits.tabs, after_hits.tabs);
+            assert_eq!(before_hits.new_tab, after_hits.new_tab);
+            assert_eq!(before_hits.tab_scroll_left, after_hits.tab_scroll_left);
+            assert_eq!(before_hits.tab_scroll_right, after_hits.tab_scroll_right);
+            assert_eq!(before_scroll, after_scroll);
+            let active_rect = before_hits
+                .tabs
+                .iter()
+                .find(|(_, id)| id == "tab_1")
+                .map(|(rect, _)| *rect);
+            for x in 0..width {
+                let mut expected = before[(x, 0)].clone();
+                if active_rect.is_some_and(|rect| x >= rect.x && x < rect.right()) {
+                    expected.fg = Color::Reset;
+                    expected.bg = Color::Red;
+                }
+                assert_eq!(
+                    after[(x, 0)],
+                    expected,
+                    "width: {width}, scroll: {scroll}, x: {x}"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn tab_overflow_controls_scroll_the_client_owned_tab_bar() {
     let mut snapshot = snapshot();
@@ -522,4 +651,295 @@ fn close_confirmation_error_becomes_client_owned_overlay_and_stable_workspace_cl
         crate::api::schema::Method::WorkspaceClose(params)
             if params.workspace_id == "ws_1" && !params.close_group
     ));
+}
+
+#[test]
+fn pane_border_colors_leave_client_tab_bar_and_popup_chrome_unchanged() {
+    // Pane frames are drawn server-side; client tabs, sidebar and popup chrome keep reading accent.
+    let config: Config = toml::from_str(
+        r##"
+[theme.custom]
+pane_border_active = "red"
+pane_border_inactive = "green"
+[theme.custom.dark]
+pane_border_active = "reset"
+"##,
+    )
+    .unwrap();
+    let overridden = ClientShellConfig::from_config(&config);
+    let baseline = ClientShellConfig::from_config(&Config::default());
+    assert_eq!(
+        overridden.palette.pane_border_active,
+        Some(ratatui::style::Color::Red)
+    );
+    assert_eq!(overridden.palette.accent, baseline.palette.accent);
+    assert_eq!(overridden.palette.overlay0, baseline.palette.overlay0);
+
+    let compose = |config: ClientShellConfig| {
+        let mut state = ClientShellState::new(config);
+        state.set_snapshot(Box::new(snapshot()));
+        state.set_pane_surface(surface_with_popup());
+        state.compose(106, 20).expect("popup frame").frame.clone()
+    };
+    assert_eq!(compose(overridden), compose(baseline));
+}
+
+fn sidebar_padding_state(padding: Option<&str>) -> ClientShellState {
+    let config: Config = match padding {
+        Some(value) => toml::from_str(&format!("[ui]\nsidebar_padding_cells = {value}\n"))
+            .expect("sidebar padding config"),
+        None => Config::default(),
+    };
+    let mut snapshot = snapshot();
+    let mut second = snapshot.workspaces[0].clone();
+    second.workspace_id = "ws_2".into();
+    second.number = 2;
+    second.label = "second-space".into();
+    second.focused = false;
+    snapshot.workspaces.push(second);
+    snapshot.agents.push(ClientShellAgent {
+        pane_id: "pane_1".into(),
+        workspace_id: "ws_1".into(),
+        tab_id: "tab_1".into(),
+        name: Some("first".into()),
+        display_agent: None,
+        agent: None,
+        title: None,
+        terminal_title: None,
+        terminal_title_stripped: None,
+        agent_status: AgentStatus::Idle,
+        state_change_seq: 1,
+        state_labels: Vec::new(),
+        tokens: Vec::new(),
+        focused: true,
+    });
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&config));
+    state.set_snapshot(Box::new(snapshot));
+    state.set_pane_surface(surface());
+    state
+}
+
+fn sidebar_hit_rects(hits: &ShellHitMap) -> Vec<(&'static str, Rect)> {
+    let mut rects = vec![
+        ("workspace_body", hits.workspace_body),
+        ("workspace_scrollbar", hits.workspace_scrollbar),
+        ("new_workspace", hits.new_workspace),
+        ("global_launcher", hits.global_launcher),
+        ("agent_body", hits.agent_body),
+        ("agent_scrollbar", hits.agent_scrollbar),
+        ("agent_sort_toggle", hits.agent_sort_toggle),
+        ("sidebar_divider", hits.sidebar_divider),
+        ("sidebar_section_divider", hits.sidebar_section_divider),
+        ("sidebar_toggle", hits.sidebar_toggle),
+    ];
+    rects.extend(hits.workspaces.iter().map(|hit| ("workspace", hit.rect)));
+    rects.extend(hits.agents.iter().map(|(rect, _)| ("agent", *rect)));
+    rects
+}
+
+fn frame_text(frame: &crate::protocol::FrameData, x: u16, y: u16, width: u16) -> String {
+    (x..x + width)
+        .map(|column| {
+            frame.cells[(y * frame.width + column) as usize]
+                .symbol
+                .as_str()
+        })
+        .collect()
+}
+
+#[test]
+fn sidebar_padding_zero_matches_baseline_frame_and_hits() {
+    let mut unset = sidebar_padding_state(None);
+    let mut zero = sidebar_padding_state(Some("0"));
+    assert_eq!(zero.config.sidebar_padding_cells, 0);
+    for (cols, rows) in [(106, 30), (106, 8), (40, 5)] {
+        let unset_frame = unset.compose(cols, rows).expect("unset frame");
+        let zero_frame = zero.compose(cols, rows).expect("zero frame");
+        assert_eq!(unset_frame.frame, zero_frame.frame, "{cols}x{rows}");
+        assert_eq!(
+            sidebar_hit_rects(&unset.hits),
+            sidebar_hit_rects(&zero.hits)
+        );
+    }
+
+    // Baseline header and chrome inventory for the default 26-column sidebar at 30 rows.
+    let frame = unset.compose(106, 30).expect("baseline frame");
+    let hits = &unset.hits;
+    assert_eq!(frame_text(&frame, 0, 0, 7), " spaces");
+    assert_eq!(hits.workspace_body, Rect::new(0, 2, 25, 12));
+    assert_eq!(hits.new_workspace, Rect::new(0, 14, 5, 1));
+    assert_eq!(hits.global_launcher.right(), 25);
+    assert_eq!(hits.sidebar_section_divider, Rect::new(0, 15, 25, 1));
+    assert_eq!(frame_text(&frame, 0, 15, 25), "─".repeat(25));
+    assert_eq!(frame_text(&frame, 0, 16, 7), " agents");
+    assert_eq!(hits.agent_sort_toggle.y, 16);
+    assert_eq!(hits.agent_sort_toggle.right(), 25);
+    assert_eq!(hits.agent_body, Rect::new(0, 18, 25, 12));
+    assert_eq!(hits.sidebar_toggle, Rect::new(24, 29, 1, 1));
+    assert_eq!(hits.sidebar_divider, Rect::new(25, 0, 1, 30));
+}
+
+#[test]
+fn sidebar_padding_insets_each_section_and_its_hits() {
+    let mut baseline = sidebar_padding_state(None);
+    let baseline_frame = baseline.compose(106, 30).expect("baseline frame");
+    let mut state = sidebar_padding_state(Some("2"));
+    let frame = state.compose(106, 30).expect("padded frame");
+    let hits = &state.hits;
+
+    // spaces section: allocation (0,0,25,15) -> content (2,2,21,11).
+    let spaces = Rect::new(2, 2, 21, 11);
+    assert_eq!(frame_text(&frame, 2, 2, 7), " spaces");
+    assert_eq!(hits.workspace_body, Rect::new(2, 4, 21, 8));
+    assert_eq!(hits.new_workspace, Rect::new(2, 12, 5, 1));
+    assert_eq!(hits.global_launcher.right(), spaces.right());
+    assert_eq!(hits.global_launcher.y, 12);
+    assert_eq!(hits.workspaces.len(), 2);
+    for hit in &hits.workspaces {
+        assert_eq!(hit.rect.x, 2);
+        assert!(hit.rect.right() <= spaces.right());
+        assert!(hit.rect.y >= hits.workspace_body.y && hit.rect.bottom() <= 12);
+    }
+
+    // agents section: divider row stays full width; content (0,16,25,14) -> (2,18,21,10).
+    let agents = Rect::new(2, 18, 21, 10);
+    assert_eq!(hits.sidebar_section_divider, Rect::new(0, 15, 25, 1));
+    assert_eq!(frame_text(&frame, 0, 15, 25), "─".repeat(25));
+    assert_eq!(frame_text(&frame, 2, 18, 7), " agents");
+    assert_eq!(hits.agent_sort_toggle.y, 18);
+    assert_eq!(hits.agent_sort_toggle.right(), agents.right());
+    assert_eq!(hits.agent_body, Rect::new(2, 20, 21, 8));
+    assert_eq!(hits.agents.len(), 1);
+    assert_eq!(hits.agents[0].0.x, 2);
+    assert!(hits.agents[0].0.right() <= agents.right());
+
+    // Allocation chrome is unchanged.
+    assert_eq!(hits.sidebar_toggle, Rect::new(24, 29, 1, 1));
+    assert_eq!(hits.sidebar_divider, Rect::new(25, 0, 1, 30));
+
+    // Padding cells are blank sidebar background; nothing paints into them.
+    let sidebar_bg = crate::protocol::color_to_u32(state.config.palette.sidebar_bg);
+    for (allocation, content) in [
+        (Rect::new(0, 0, 25, 15), spaces),
+        (Rect::new(0, 16, 25, 14), agents),
+    ] {
+        for y in allocation.top()..allocation.bottom() {
+            for x in allocation.left()..allocation.right() {
+                if super::contains(content, (x, y)) || super::contains(hits.sidebar_toggle, (x, y))
+                {
+                    continue;
+                }
+                let cell = &frame.cells[(y * frame.width + x) as usize];
+                assert_eq!(cell.symbol, " ", "padding cell ({x},{y})");
+                assert_eq!(cell.bg, sidebar_bg, "padding cell ({x},{y})");
+            }
+        }
+    }
+
+    // Pane surface, pane gaps and everything right of the sidebar are untouched.
+    for y in 0..30 {
+        for x in 26..106 {
+            let index = (y * 106 + x) as usize;
+            assert_eq!(
+                frame.cells[index], baseline_frame.cells[index],
+                "pane cell ({x},{y})"
+            );
+        }
+    }
+
+    // Pointer origin follows the inset: a padding cell on a row misses, the content cell hits.
+    let row = state.hits.workspaces[0].rect;
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Right),
+        column: 1,
+        row: row.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(state.overlay.is_none(), "padding is not a workspace target");
+    state.handle_raw_events(vec![RawInputEvent::Mouse(crossterm::event::MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Right),
+        column: row.x,
+        row: row.y,
+        modifiers: KeyModifiers::empty(),
+    })]);
+    assert!(matches!(
+        state.overlay,
+        Some(ClientShellOverlay::ContextMenu(ClientContextMenuOverlay {
+            target: ClientContextMenuTarget::Workspace { ref workspace_id, .. },
+            ..
+        })) if workspace_id == "ws_1"
+    ));
+}
+
+#[test]
+fn sidebar_padding_clamps_in_narrow_sidebar_without_out_of_bounds_hits() {
+    for (cols, rows) in [(106, 30), (106, 12), (106, 7), (106, 4), (80, 3)] {
+        for padding in ["1", "3", "65535"] {
+            let mut state = sidebar_padding_state(Some(padding));
+            state.config.sidebar_min_width = 6;
+            state.config.sidebar_width = 6;
+            state.sidebar_width = 6;
+            state.compose(cols, rows).expect("narrow padded frame");
+            let sidebar = Rect::new(0, 0, 6, rows);
+            for (name, rect) in sidebar_hit_rects(&state.hits) {
+                if rect.is_empty() {
+                    continue;
+                }
+                assert!(
+                    rect.right() <= sidebar.right() && rect.bottom() <= sidebar.bottom(),
+                    "{name} {rect:?} outside sidebar at {cols}x{rows} padding {padding}"
+                );
+            }
+            // At least one usable content column remains in each section.
+            if rows >= 12 {
+                // Five content columns: padding clamps to two so one usable column remains.
+                let (x, width) = if padding == "1" { (1, 3) } else { (2, 1) };
+                assert_eq!(state.hits.workspace_body.x, x);
+                assert_eq!(state.hits.workspace_body.width, width);
+                assert_eq!(state.hits.agent_body.x, x);
+                assert_eq!(state.hits.agent_body.width, width);
+                assert!(!state.hits.workspaces.is_empty());
+            }
+        }
+    }
+}
+
+#[test]
+fn sidebar_padding_keeps_attention_menu_inside_narrow_content() {
+    let mut unpadded = sidebar_padding_state(None);
+    let mut snapshot = unpadded.snapshot.as_deref().expect("snapshot").clone();
+    snapshot.integration_updates_available = true;
+    unpadded.set_snapshot(Box::new(snapshot.clone()));
+    let frame = unpadded.compose(106, 60).expect("unpadded attention frame");
+    let footer_y = unpadded.hits.new_workspace.y;
+    assert_eq!(frame_text(&frame, 19, footer_y, 6), "● menu");
+    assert_eq!(unpadded.hits.global_launcher, Rect::new(17, footer_y, 8, 1));
+
+    // Spaces allocation (0,0,25,30): padding 10 leaves (10,10,5,10); 65535 clamps to (12,14,1,2).
+    for (padding, content, button) in [
+        ("10", Rect::new(10, 10, 5, 10), "● men"),
+        ("65535", Rect::new(12, 14, 1, 2), "●"),
+    ] {
+        let mut state = sidebar_padding_state(Some(padding));
+        state.set_snapshot(Box::new(snapshot.clone()));
+        let frame = state.compose(106, 60).expect("padded attention frame");
+        let footer_y = content.bottom() - 1;
+        assert_eq!(
+            frame_text(&frame, content.x, footer_y, content.width),
+            button,
+            "padding {padding}"
+        );
+        for y in 0..30 {
+            for x in 0..25 {
+                if super::contains(content, (x, y)) {
+                    continue;
+                }
+                assert_eq!(
+                    frame.cells[(y * frame.width + x) as usize].symbol,
+                    " ",
+                    "padding {padding} cell ({x},{y})"
+                );
+            }
+        }
+    }
 }

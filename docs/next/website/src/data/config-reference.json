@@ -65,6 +65,42 @@
           "description": "Override the accent color token on top of the base theme. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
+          "key": "theme.custom.active_tab_fg",
+          "type": "color",
+          "default": "unset",
+          "description": "Set only the focused tab label foreground. When unset, follows panel_bg (surface_dim when panel_bg is reset). Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default, not inheritance."
+        },
+        {
+          "key": "theme.custom.active_tab_bg",
+          "type": "color",
+          "default": "unset",
+          "description": "Set only the focused tab label background. When unset, follows the resolved accent. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default, not inheritance."
+        },
+        {
+          "key": "theme.custom.pane_border_active",
+          "type": "color",
+          "default": "unset",
+          "description": "Set only the focused pane frame and pane border title color. When unset, follows the resolved accent. Tabs, popups and other accent uses are unchanged. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default foreground, not inheritance."
+        },
+        {
+          "key": "theme.custom.pane_border_inactive",
+          "type": "color",
+          "default": "unset",
+          "description": "Set only the unfocused pane frame and pane border title color. When unset, follows the resolved overlay0. Matching pane_border_active removes the color-only focus difference; the focused title stays bold. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default foreground, not inheritance."
+        },
+        {
+          "key": "theme.custom.popup_bg",
+          "type": "color",
+          "default": "unset",
+          "description": "Set the terminal popup background (command and plugin popups): blank popup cells and popup terminal cells that use the default background. Explicit terminal backgrounds are kept. When unset, popup chrome follows panel_bg and terminal cells keep the terminal default. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default, not inheritance."
+        },
+        {
+          "key": "theme.custom.popup_border",
+          "type": "color",
+          "default": "unset",
+          "description": "Set the terminal popup border and title color (command and plugin popups). When unset, follows the resolved accent. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default, not inheritance."
+        },
+        {
           "key": "theme.custom.panel_bg",
           "type": "color",
           "default": "unset",
@@ -75,6 +111,12 @@
           "type": "color",
           "default": "unset",
           "description": "Set the desktop sidebar background without changing other panel surfaces. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.pane_inactive_bg",
+          "type": "color",
+          "default": "unset",
+          "description": "Tint the terminal-default background of unfocused panes. When unset, unfocused panes keep the baseline. Only cells without an explicit ANSI background change; explicit backgrounds, reverse video, selection, the focused pane, popups, borders, and the sidebar are unchanged. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset is explicit and leaves the terminal default."
         },
         {
           "key": "theme.custom.active_row_bg",
@@ -179,6 +221,42 @@
           "description": "Override the accent color token when auto_switch selects a light appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
+          "key": "theme.custom.light.active_tab_fg",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the focused tab label foreground only when auto_switch selects a light appearance. Omission inherits theme.custom.active_tab_fg, or panel contrast if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset is explicit, not inheritance."
+        },
+        {
+          "key": "theme.custom.light.active_tab_bg",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the focused tab label background only when auto_switch selects a light appearance. Omission inherits theme.custom.active_tab_bg, or the resolved accent if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset is explicit, not inheritance."
+        },
+        {
+          "key": "theme.custom.light.pane_border_active",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the focused pane frame and title color only when auto_switch selects a light appearance. Omission inherits theme.custom.pane_border_active, or the resolved accent if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default foreground, not inheritance."
+        },
+        {
+          "key": "theme.custom.light.pane_border_inactive",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the unfocused pane frame and title color only when auto_switch selects a light appearance. Omission inherits theme.custom.pane_border_inactive, or the resolved overlay0 if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default foreground, not inheritance."
+        },
+        {
+          "key": "theme.custom.light.popup_bg",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the terminal popup background only when auto_switch selects a light appearance. Omission inherits theme.custom.popup_bg, or the default popup background if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset is explicit, not inheritance."
+        },
+        {
+          "key": "theme.custom.light.popup_border",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the terminal popup border and title color only when auto_switch selects a light appearance. Omission inherits theme.custom.popup_border, or the resolved accent if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset is explicit, not inheritance."
+        },
+        {
           "key": "theme.custom.light.panel_bg",
           "type": "color",
           "default": "unset",
@@ -189,6 +267,12 @@
           "type": "color",
           "default": "unset",
           "description": "Override the sidebar_bg color token when auto_switch selects a light appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.light.pane_inactive_bg",
+          "type": "color",
+          "default": "unset",
+          "description": "Override pane_inactive_bg only when auto_switch selects a light appearance. Omission inherits theme.custom.pane_inactive_bg, or the baseline if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset is explicit, not inheritance."
         },
         {
           "key": "theme.custom.light.active_row_bg",
@@ -293,6 +377,42 @@
           "description": "Override the accent color token when auto_switch selects a dark appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
         },
         {
+          "key": "theme.custom.dark.active_tab_fg",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the focused tab label foreground only when auto_switch selects a dark appearance. Omission inherits theme.custom.active_tab_fg, or panel contrast if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset is explicit, not inheritance."
+        },
+        {
+          "key": "theme.custom.dark.active_tab_bg",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the focused tab label background only when auto_switch selects a dark appearance. Omission inherits theme.custom.active_tab_bg, or the resolved accent if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset is explicit, not inheritance."
+        },
+        {
+          "key": "theme.custom.dark.pane_border_active",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the focused pane frame and title color only when auto_switch selects a dark appearance. Omission inherits theme.custom.pane_border_active, or the resolved accent if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default foreground, not inheritance."
+        },
+        {
+          "key": "theme.custom.dark.pane_border_inactive",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the unfocused pane frame and title color only when auto_switch selects a dark appearance. Omission inherits theme.custom.pane_border_inactive, or the resolved overlay0 if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default foreground, not inheritance."
+        },
+        {
+          "key": "theme.custom.dark.popup_bg",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the terminal popup background only when auto_switch selects a dark appearance. Omission inherits theme.custom.popup_bg, or the default popup background if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset is explicit, not inheritance."
+        },
+        {
+          "key": "theme.custom.dark.popup_border",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the terminal popup border and title color only when auto_switch selects a dark appearance. Omission inherits theme.custom.popup_border, or the resolved accent if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset is explicit, not inheritance."
+        },
+        {
           "key": "theme.custom.dark.panel_bg",
           "type": "color",
           "default": "unset",
@@ -303,6 +423,12 @@
           "type": "color",
           "default": "unset",
           "description": "Override the sidebar_bg color token when auto_switch selects a dark appearance. Applied after theme.custom. Accepts hex, named colors, rgb(r,g,b), or reset aliases."
+        },
+        {
+          "key": "theme.custom.dark.pane_inactive_bg",
+          "type": "color",
+          "default": "unset",
+          "description": "Override pane_inactive_bg only when auto_switch selects a dark appearance. Omission inherits theme.custom.pane_inactive_bg, or the baseline if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset is explicit, not inheritance."
         },
         {
           "key": "theme.custom.dark.active_row_bg",
@@ -894,6 +1020,12 @@
           ]
         },
         {
+          "key": "ui.sidebar_padding_cells",
+          "type": "integer",
+          "default": "0",
+          "description": "Empty cells inside each expanded sidebar section, on every side. Reduced only to keep one usable cell; the sidebar width, section split and dividers do not change."
+        },
+        {
           "key": "ui.mobile_width_threshold",
           "type": "integer",
           "default": "64",
@@ -976,6 +1108,12 @@
           "description": "Draw borders along the outside edge of the pane area. Disable with pane gaps disabled for tmux-style internal splitters without an outside frame."
         },
         {
+          "key": "ui.rounded_borders",
+          "type": "boolean",
+          "default": "false",
+          "description": "Round light corners of existing client interface frames without changing geometry or adding borders. Shared junctions and double/heavy glyphs remain square."
+        },
+        {
           "key": "ui.pane_scrollbars",
           "type": "boolean",
           "default": "true",
@@ -988,10 +1126,115 @@
           "description": "Keep split panes visually separated instead of sharing divider borders."
         },
         {
+          "key": "ui.pane_border_style",
+          "type": "enum",
+          "default": "unset",
+          "description": "Line style of every pane frame: light, rounded (arc corners), heavy, double, or light, heavy and rounded lines with 2, 3 or 4 dashes. Only straight runs are dashed; corners and junctions stay solid, and heavy and double corners stay square. Unset keeps the stock light lines. Malformed values are reported and ignored.",
+          "values": [
+            "light",
+            "rounded",
+            "heavy",
+            "double",
+            "light-dashed-2",
+            "light-dashed-3",
+            "light-dashed-4",
+            "heavy-dashed-2",
+            "heavy-dashed-3",
+            "heavy-dashed-4",
+            "rounded-dashed-2",
+            "rounded-dashed-3",
+            "rounded-dashed-4"
+          ]
+        },
+        {
+          "key": "ui.pane_border_style_active",
+          "type": "enum",
+          "default": "unset",
+          "description": "Line style of the focused pane's frame, including the shared dividers it owns (the cells that get the focus color). Falls back to ui.pane_border_style, then light. Malformed values are reported and ignored.",
+          "values": [
+            "light",
+            "rounded",
+            "heavy",
+            "double",
+            "light-dashed-2",
+            "light-dashed-3",
+            "light-dashed-4",
+            "heavy-dashed-2",
+            "heavy-dashed-3",
+            "heavy-dashed-4",
+            "rounded-dashed-2",
+            "rounded-dashed-3",
+            "rounded-dashed-4"
+          ]
+        },
+        {
+          "key": "ui.pane_border_style_inactive",
+          "type": "enum",
+          "default": "unset",
+          "description": "Line style of unfocused pane frames. Falls back to ui.pane_border_style, then light. Malformed values are reported and ignored.",
+          "values": [
+            "light",
+            "rounded",
+            "heavy",
+            "double",
+            "light-dashed-2",
+            "light-dashed-3",
+            "light-dashed-4",
+            "heavy-dashed-2",
+            "heavy-dashed-3",
+            "heavy-dashed-4",
+            "rounded-dashed-2",
+            "rounded-dashed-3",
+            "rounded-dashed-4"
+          ]
+        },
+        {
+          "key": "ui.pane_gap_cells",
+          "type": "integer",
+          "default": "unset",
+          "description": "Blank cells between neighbouring split panes (0-65535). When set it overrides pane_gaps: 0 shares dividers, N leaves N empty cells between pane frames (frame lines are extra) or between pane contents with borders off. Small windows use a smaller gap only while needed to keep every pane usable; malformed values are reported and ignored."
+        },
+        {
+          "key": "ui.pane_padding_cells",
+          "type": "integer",
+          "default": "0",
+          "description": "Empty terminal cells (0 to 65535) between each pane's frame or edge and its terminal content, on every side. The scrollbar stays in its own column. On small panes the padding shrinks so the terminal keeps at least 4 columns and 2 rows. An invalid value disables only this setting."
+        },
+        {
+          "key": "ui.inactive_pane_dim_percent",
+          "type": "integer",
+          "default": "0",
+          "description": "Fade the text of unfocused panes in terminal mode by blending text colors toward the terminal default background by this percent (0-100, 0 = off). Display only: backgrounds, borders, faint text, selections, text on its own background color (including reverse video) and pane contents are unchanged. Needs the terminal to report its default colors and palette; unreported colors stay as they are. Malformed values are reported and ignored."
+        },
+        {
+          "key": "ui.inactive_pane_dim_exclude_processes",
+          "type": "list of strings",
+          "default": "[]",
+          "description": "Exact foreground-process basenames whose panes should not be faded. Accepted but not applied yet: Herdr cannot see pane foreground processes when it draws. Malformed values are reported and ignored."
+        },
+        {
           "key": "ui.show_agent_labels_on_pane_borders",
           "type": "boolean",
           "default": "false",
           "description": "Show agent labels in split pane borders when no manual pane label is set."
+        },
+        {
+          "key": "ui.pane_title_tokens",
+          "type": "token row",
+          "default": "unset",
+          "description": "Compose pane border titles from one row in the same format as ui.sidebar.agents.rows entries (token strings or { token, fg, bold, dim, rules } tables). Supports workspace, tab, pane, agent, terminal_title, terminal_title_stripped and $name pane metadata tokens; state_icon, state_text and machine resolve as missing. Missing tokens are skipped; when no text remains the plain title is used. Unset keeps the plain title."
+        },
+        {
+          "key": "ui.pane_manual_label_first",
+          "type": "boolean",
+          "default": "false",
+          "description": "Let a nonempty manual pane label take priority over reported titles and ui.pane_title_tokens. By default a reported title wins over the manual label."
+        },
+        {
+          "key": "ui.pane_border_identity_token",
+          "type": "token",
+          "default": "unset",
+          "description": "Color the frame lines of unfocused panes from one token in the same format as a ui.sidebar.agents.rows entry (a token string or { token, fg, bold, dim, rules } table), for example { token = \"$role\", fg = \"#89b4fa\" }. When the token resolves to text and its style (after rules) has an fg, that color is used for the pane's inactive lines; otherwise the normal inactive border color is kept. The focused pane keeps the accent color. A divider or junction shared only by unfocused panes uses an identity color only when every pane that shares it has the same one. Unset keeps the existing border colors."
         },
         {
           "key": "ui.hide_tab_bar_when_single_tab",

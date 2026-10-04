@@ -416,7 +416,7 @@ pub(super) fn render_pane_surface(
             let hit_rect = split_hit_rect(
                 split,
                 app.state.pane_borders.draws_borders(),
-                app.state.pane_gaps,
+                layout.pane_gaps,
                 &pane_frames,
             )?;
             let direction = match split.direction {
@@ -573,15 +573,17 @@ fn client_popup_size(size: crate::popup_size::PopupSize) -> protocol::ClientShel
 fn split_hit_rect(
     split: &crate::layout::SplitBorder,
     pane_borders: bool,
-    pane_gaps: bool,
+    pane_gaps: crate::ui::PaneGaps,
     pane_frames: &[Rect],
 ) -> Option<Rect> {
-    let hit = match (split.direction, pane_borders, pane_gaps) {
+    // Separated frames: both frame edges plus the blank cells taken from the leading pane.
+    let leading = 1u16.saturating_add(pane_gaps.blank);
+    let hit = match (split.direction, pane_borders, pane_gaps.separate) {
         (ratatui::layout::Direction::Horizontal, true, false) => {
             Rect::new(split.pos, split.area.y, 1, split.area.height)
         }
         (ratatui::layout::Direction::Horizontal, true, true) => {
-            let start = split.pos.saturating_sub(1);
+            let start = split.pos.saturating_sub(leading);
             Rect::new(
                 start,
                 split.area.y,
@@ -590,16 +592,16 @@ fn split_hit_rect(
             )
         }
         (ratatui::layout::Direction::Horizontal, false, true) => Rect::new(
-            split.pos.checked_sub(1)?,
+            split.pos.checked_sub(pane_gaps.blank)?,
             split.area.y,
-            1,
+            pane_gaps.blank,
             split.area.height,
         ),
         (ratatui::layout::Direction::Vertical, true, false) => {
             Rect::new(split.area.x, split.pos, split.area.width, 1)
         }
         (ratatui::layout::Direction::Vertical, true, true) => {
-            let start = split.pos.saturating_sub(1);
+            let start = split.pos.saturating_sub(leading);
             Rect::new(
                 split.area.x,
                 start,
@@ -607,9 +609,12 @@ fn split_hit_rect(
                 split.pos.saturating_sub(start).saturating_add(1),
             )
         }
-        (ratatui::layout::Direction::Vertical, false, true) => {
-            Rect::new(split.area.x, split.pos.checked_sub(1)?, split.area.width, 1)
-        }
+        (ratatui::layout::Direction::Vertical, false, true) => Rect::new(
+            split.area.x,
+            split.pos.checked_sub(pane_gaps.blank)?,
+            split.area.width,
+            pane_gaps.blank,
+        ),
         (_, false, false) => return None,
     };
     if !pane_borders
@@ -790,18 +795,41 @@ mod tests {
             path: vec![false],
         };
         assert_eq!(
-            split_hit_rect(&horizontal, true, false, &[]),
+            split_hit_rect(
+                &horizontal,
+                true,
+                crate::ui::PaneGaps::legacy(false, true),
+                &[]
+            ),
             Some(Rect::new(20, 3, 1, 12))
         );
         assert_eq!(
-            split_hit_rect(&horizontal, true, true, &[]),
+            split_hit_rect(
+                &horizontal,
+                true,
+                crate::ui::PaneGaps::legacy(true, true),
+                &[]
+            ),
             Some(Rect::new(19, 3, 2, 12))
         );
         assert_eq!(
-            split_hit_rect(&horizontal, false, true, &[]),
+            split_hit_rect(
+                &horizontal,
+                false,
+                crate::ui::PaneGaps::legacy(true, false),
+                &[]
+            ),
             Some(Rect::new(19, 3, 1, 12))
         );
-        assert_eq!(split_hit_rect(&horizontal, false, false, &[]), None);
+        assert_eq!(
+            split_hit_rect(
+                &horizontal,
+                false,
+                crate::ui::PaneGaps::legacy(false, false),
+                &[]
+            ),
+            None
+        );
 
         let vertical = crate::layout::SplitBorder {
             pos: 9,
@@ -811,7 +839,12 @@ mod tests {
             path: vec![true],
         };
         assert_eq!(
-            split_hit_rect(&vertical, true, true, &[]),
+            split_hit_rect(
+                &vertical,
+                true,
+                crate::ui::PaneGaps::legacy(true, true),
+                &[]
+            ),
             Some(Rect::new(2, 8, 40, 2))
         );
 
@@ -823,13 +856,970 @@ mod tests {
             path: Vec::new(),
         };
         assert_eq!(
-            split_hit_rect(&edge, true, true, &[]),
+            split_hit_rect(&edge, true, crate::ui::PaneGaps::legacy(true, true), &[]),
             Some(Rect::new(0, 0, 1, 4))
         );
-        assert_eq!(split_hit_rect(&edge, false, true, &[]), None);
         assert_eq!(
-            split_hit_rect(&horizontal, false, true, &[Rect::new(19, 3, 1, 12)]),
+            split_hit_rect(&edge, false, crate::ui::PaneGaps::legacy(true, false), &[]),
             None
         );
+        assert_eq!(
+            split_hit_rect(
+                &horizontal,
+                false,
+                crate::ui::PaneGaps::legacy(true, false),
+                &[Rect::new(19, 3, 1, 12)]
+            ),
+            None
+        );
+    }
+
+    const ROUNDED_COLS: u16 = 100;
+    const ROUNDED_ROWS: u16 = 30;
+
+    /// Composes the same workspace through the server and client with
+    /// `rounded_borders` off, then on.
+    fn rounded_frame_pair(
+        build: impl Fn() -> crate::workspace::Workspace,
+        configure: impl Fn(&mut crate::config::Config),
+    ) -> (crate::protocol::FrameData, crate::protocol::FrameData) {
+        const COLS: u16 = ROUNDED_COLS;
+        const ROWS: u16 = ROUNDED_ROWS;
+        let mut frames = Vec::new();
+        for rounded in [false, true] {
+            let mut config = crate::config::Config::default();
+            configure(&mut config);
+            config.ui.rounded_borders = rounded;
+            let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+            let mut app = crate::app::App::new(
+                &config,
+                crate::app::AppPolicy::TEST,
+                None,
+                api_rx,
+                crate::api::EventHub::default(),
+            );
+            app.state.workspaces = vec![build()];
+            app.state.active = Some(0);
+            app.state.selected = 0;
+            let mut client = crate::client::ClientShellState::new(
+                crate::client::ClientShellConfig::from_config(&config),
+            );
+            client.set_snapshot(Box::new(snapshot(&app, "boot", 1, None, None)));
+            let size = client.surface_size(COLS, ROWS);
+            let target = Some(crate::ui::TabSurfaceTarget {
+                workspace_index: 0,
+                tab_index: app.state.workspaces[0].active_tab_index(),
+            });
+            let rendered = render_pane_surface(
+                &mut app,
+                target,
+                Rect::new(0, 0, size.cols, size.rows),
+                true,
+                true,
+                crate::kitty_graphics::HostCellSize {
+                    width_px: 1,
+                    height_px: 1,
+                },
+                &crate::kitty_graphics::surface::DeliveryCache::default(),
+                1,
+            )
+            .expect("pane surface");
+            client.set_pane_surface(crate::protocol::PaneSurfaceFrame {
+                boot_id: "boot".into(),
+                projection_revision: 1,
+                surface_revision: 0,
+                frame: rendered.frame,
+                panes: rendered.panes,
+                splits: rendered.splits,
+                popup: rendered.popup,
+                graphics: rendered.graphics,
+            });
+            frames.push(client.compose(COLS, ROWS).expect("composed frame").frame);
+        }
+        let rounded = frames.pop().expect("rounded frame");
+        let square = frames.pop().expect("square frame");
+        (square, rounded)
+    }
+
+    fn rounded_corner_changes(
+        build: impl Fn() -> crate::workspace::Workspace,
+        configure: impl Fn(&mut crate::config::Config),
+    ) -> Vec<((u16, u16), String, String)> {
+        const COLS: u16 = ROUNDED_COLS;
+        let (square, rounded) = rounded_frame_pair(build, configure);
+        let (square, rounded) = (&square, &rounded);
+        let symbols: Vec<&str> = square
+            .cells
+            .iter()
+            .map(|cell| cell.symbol.as_str())
+            .collect();
+        assert!(
+            symbols.windows(3).any(|w| w == ["┌", " ", "B"]),
+            "terminal content control must render"
+        );
+        assert_eq!(rounded.cursor, square.cursor);
+        assert_eq!(rounded.hyperlinks, square.hyperlinks);
+        let mut changes = Vec::new();
+        for (index, (before, after)) in square.cells.iter().zip(&rounded.cells).enumerate() {
+            if before == after {
+                continue;
+            }
+            let mut expected = before.clone();
+            expected.symbol = crate::ui::rounded_light_corner(&before.symbol)
+                .expect("only light corners may change")
+                .into();
+            assert_eq!(after, &expected);
+            let point = (
+                (index % usize::from(COLS)) as u16,
+                (index / usize::from(COLS)) as u16,
+            );
+            changes.push((point, before.symbol.clone(), after.symbol.clone()));
+        }
+        changes
+    }
+
+    fn rounded_test_workspace(panes: usize, zoomed: bool) -> crate::workspace::Workspace {
+        let mut workspace = crate::workspace::Workspace::test_new("rounded");
+        let root = workspace.tabs[0].root_pane;
+        workspace.insert_test_runtime(
+            root,
+            crate::terminal::TerminalRuntime::test_with_screen_bytes(80, 23, b"\xe2\x94\x8c BOX"),
+        );
+        for _ in 1..panes {
+            let pane = workspace.test_split(ratatui::layout::Direction::Horizontal);
+            workspace.insert_test_runtime(
+                pane,
+                crate::terminal::TerminalRuntime::test_with_screen_bytes(
+                    80,
+                    23,
+                    b"\xe2\x94\x8c BOX",
+                ),
+            );
+        }
+        workspace.tabs[0].zoomed = zoomed;
+        workspace
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn rounded_borders_follow_real_pane_geometry_through_the_client() {
+        let changes = |panes, zoomed, configure: fn(&mut crate::config::Config)| {
+            rounded_corner_changes(|| rounded_test_workspace(panes, zoomed), configure)
+        };
+        let corners = |c: &Vec<((u16, u16), String, String)>| {
+            let mut arcs: Vec<&str> = c.iter().map(|(_, _, after)| after.as_str()).collect();
+            arcs.sort_unstable();
+            arcs.join("")
+        };
+        assert!(
+            changes(1, false, |_| {}).is_empty(),
+            "lone auto pane stays unframed"
+        );
+        let lone_always = changes(1, false, |config| {
+            config.ui.pane_borders = crate::config::PaneBordersConfig::Always
+        });
+        assert_eq!(
+            corners(&lone_always),
+            "╭╮╯╰",
+            "lone pane framed by pane_borders=always rounds its four corners"
+        );
+        assert!(
+            changes(2, false, |config| config.ui.pane_outer_borders = false).is_empty(),
+            "outer borders off leaves only a straight divider"
+        );
+        let zoomed = changes(2, true, |_| {});
+        assert_eq!(
+            corners(&zoomed),
+            "╭╮╯╰",
+            "zoom rounds only the visible frame"
+        );
+        let shared = changes(2, false, |config| config.ui.pane_gaps = false);
+        assert_eq!(
+            corners(&shared),
+            "╭╮╯╰",
+            "shared grid rounds only outer corners"
+        );
+        assert_eq!(zoomed, shared);
+        let gaps = changes(2, false, |_| {});
+        assert_eq!(
+            corners(&gaps),
+            "╭╭╮╮╯╯╰╰",
+            "separated panes round each frame"
+        );
+    }
+
+    fn set_border_styles(
+        config: &mut crate::config::Config,
+        all: Option<&str>,
+        active: Option<&str>,
+        inactive: Option<&str>,
+    ) {
+        let value = |name: Option<&str>| name.map(|name| toml::Value::String(name.into()));
+        config.ui.pane_border_style = value(all);
+        config.ui.pane_border_style_active = value(active);
+        config.ui.pane_border_style_inactive = value(inactive);
+    }
+
+    fn frame_glyphs(frame: &FrameData, set: &str) -> String {
+        let mut found: Vec<&str> = frame
+            .cells
+            .iter()
+            .map(|cell| cell.symbol.as_str())
+            .filter(|symbol| !symbol.is_empty() && set.contains(symbol))
+            .collect();
+        found.sort_unstable();
+        found.concat()
+    }
+
+    fn sorted_glyphs(corners: &str) -> String {
+        let mut chars: Vec<char> = corners.chars().collect();
+        chars.sort_unstable();
+        chars.into_iter().collect()
+    }
+
+    const ARCS: &str = "╭╮╰╯";
+    const LIGHT_CORNERS: &str = "┌┐└┘";
+    const HEAVY_CORNERS: &str = "┏┓┗┛";
+    const DOUBLE_CORNERS: &str = "╔╗╚╝";
+
+    /// Pane styles x B1: the client pass rounds light corners only, so heavy
+    /// and double corners stay square.
+    #[tokio::test(flavor = "current_thread")]
+    async fn rounded_borders_keep_heavy_and_double_pane_corners_square() {
+        let build = || rounded_test_workspace(2, false);
+        for shared in [false, true] {
+            let configure = |all: Option<&'static str>, active: Option<&'static str>| {
+                move |config: &mut crate::config::Config| {
+                    set_border_styles(config, all, active, None);
+                    config.ui.pane_gaps = !shared;
+                }
+            };
+
+            // Heavy everywhere, double focus: no corner rounds.
+            let heavy_double = configure(Some("heavy"), Some("double"));
+            assert!(rounded_corner_changes(build, heavy_double).is_empty());
+            let (square, rounded) = rounded_frame_pair(build, heavy_double);
+            assert_eq!(square, rounded, "shared={shared}");
+            assert_eq!(frame_glyphs(&rounded, ARCS), "", "shared={shared}");
+            assert!(
+                !frame_glyphs(&rounded, DOUBLE_CORNERS).is_empty(),
+                "shared={shared}"
+            );
+            if !shared {
+                assert_eq!(
+                    frame_glyphs(&rounded, DOUBLE_CORNERS),
+                    sorted_glyphs(DOUBLE_CORNERS)
+                );
+                assert_eq!(
+                    frame_glyphs(&rounded, HEAVY_CORNERS),
+                    sorted_glyphs(HEAVY_CORNERS)
+                );
+            }
+
+            // Heavy everywhere: nothing rounds.
+            let heavy = configure(Some("heavy"), None);
+            assert!(rounded_corner_changes(build, heavy).is_empty());
+            let (_, rounded) = rounded_frame_pair(build, heavy);
+            assert_eq!(frame_glyphs(&rounded, ARCS), "", "shared={shared}");
+            assert_eq!(
+                frame_glyphs(&rounded, DOUBLE_CORNERS),
+                "",
+                "shared={shared}"
+            );
+        }
+    }
+
+    /// `rounded_borders = true` with `pane_border_style_active = "heavy"`:
+    /// unfocused frames round in the client, the focused heavy frame stays square.
+    #[tokio::test(flavor = "current_thread")]
+    async fn rounded_borders_with_heavy_active_style_round_only_unfocused_frames() {
+        let build = || rounded_test_workspace(2, false);
+        for shared in [false, true] {
+            let configure = move |config: &mut crate::config::Config| {
+                set_border_styles(config, None, Some("heavy"), None);
+                config.ui.pane_gaps = !shared;
+            };
+            let changes = rounded_corner_changes(build, configure);
+            assert!(changes
+                .iter()
+                .all(|(_, before, _)| LIGHT_CORNERS.contains(before.as_str())));
+            let (_, rounded) = rounded_frame_pair(build, configure);
+            // Only the terminal content controls keep `┌`.
+            assert_eq!(
+                frame_glyphs(&rounded, LIGHT_CORNERS),
+                "┌┌",
+                "shared={shared}"
+            );
+            if shared {
+                // The focused (newest, right) pane owns both right corners;
+                // the left pane's outer corners round.
+                assert_eq!(frame_glyphs(&rounded, "┓┛"), sorted_glyphs("┓┛"));
+                assert_eq!(frame_glyphs(&rounded, ARCS), sorted_glyphs("╭╰"));
+            } else {
+                assert_eq!(changes.len(), 4);
+                assert_eq!(
+                    frame_glyphs(&rounded, HEAVY_CORNERS),
+                    sorted_glyphs(HEAVY_CORNERS)
+                );
+                assert_eq!(frame_glyphs(&rounded, ARCS), sorted_glyphs(ARCS));
+            }
+        }
+    }
+
+    /// Phase 3c: the server emits arcs for `rounded*` styles per state, so they
+    /// reach every client without `rounded_borders`, and the client pass is
+    /// idempotent over them.
+    #[tokio::test(flavor = "current_thread")]
+    async fn server_emits_rounded_style_arcs_per_state_and_client_rounding_is_idempotent() {
+        let build = || rounded_test_workspace(2, false);
+        for shared in [false, true] {
+            // Inactive rounded, active heavy: arcs already in the server frame.
+            let per_state = move |config: &mut crate::config::Config| {
+                set_border_styles(config, None, Some("heavy"), Some("rounded"));
+                config.ui.pane_gaps = !shared;
+            };
+            let (server_only, with_client) = rounded_frame_pair(build, per_state);
+            assert_eq!(server_only, with_client, "shared={shared}");
+            if !shared {
+                assert_eq!(frame_glyphs(&server_only, ARCS), sorted_glyphs(ARCS));
+                assert_eq!(
+                    frame_glyphs(&server_only, HEAVY_CORNERS),
+                    sorted_glyphs(HEAVY_CORNERS)
+                );
+            } else {
+                assert_eq!(frame_glyphs(&server_only, ARCS), sorted_glyphs("╭╰"));
+            }
+
+            // `pane_border_style = "rounded"` matches B1's client rounding of a
+            // stock frame cell for cell, and B1 on top changes nothing.
+            let rounded_style = move |config: &mut crate::config::Config| {
+                set_border_styles(config, Some("rounded"), None, None);
+                config.ui.pane_gaps = !shared;
+            };
+            let stock = move |config: &mut crate::config::Config| config.ui.pane_gaps = !shared;
+            let (server_arcs, server_and_client) = rounded_frame_pair(build, rounded_style);
+            let (_, client_arcs) = rounded_frame_pair(build, stock);
+            assert_eq!(server_arcs, server_and_client, "shared={shared}");
+            assert_eq!(server_arcs, client_arcs, "shared={shared}");
+            assert!(!frame_glyphs(&server_arcs, ARCS).is_empty());
+        }
+    }
+
+    /// B1 x S1/S2-pane: corner detection compares each pane's published rect with its
+    /// content rect. Gaps keep one rounded frame per pane, padding inside a frame does not
+    /// move the corners, and padding without frames (content rect inset, corner cells
+    /// blank) rounds nothing.
+    #[tokio::test(flavor = "current_thread")]
+    async fn rounded_borders_follow_pane_gap_cells_and_pane_padding() {
+        let build = || rounded_test_workspace(2, false);
+        let ui = |toml_text: &'static str| {
+            move |config: &mut crate::config::Config| {
+                let parsed: crate::config::Config = toml::from_str(toml_text).expect("ui config");
+                config.ui = parsed.ui;
+            }
+        };
+        let arcs = |changes: &Vec<((u16, u16), String, String)>| {
+            let mut arcs: Vec<&str> = changes.iter().map(|(_, _, after)| after.as_str()).collect();
+            arcs.sort_unstable();
+            arcs.concat()
+        };
+        let plain = rounded_corner_changes(build, ui("[ui]\n"));
+        assert_eq!(arcs(&plain), "╭╭╮╮╯╯╰╰");
+        for spaced in [
+            "[ui]\npane_gap_cells = 2\n",
+            "[ui]\npane_padding_cells = 1\n",
+            "[ui]\npane_gap_cells = 2\npane_padding_cells = 1\n",
+        ] {
+            assert_eq!(
+                arcs(&rounded_corner_changes(build, ui(spaced))),
+                arcs(&plain),
+                "{spaced}"
+            );
+        }
+        assert_eq!(
+            arcs(&rounded_corner_changes(
+                build,
+                ui("[ui]\npane_gap_cells = 0\n")
+            )),
+            "╭╮╯╰",
+            "zero gap shares dividers: only the grid's outer corners round"
+        );
+        for frameless in [
+            "[ui]\npane_borders = \"off\"\npane_padding_cells = 1\n",
+            "[ui]\npane_borders = \"off\"\npane_gap_cells = 2\npane_padding_cells = 1\n",
+        ] {
+            assert!(
+                rounded_corner_changes(build, ui(frameless)).is_empty(),
+                "{frameless}"
+            );
+        }
+    }
+
+    /// Pane border styles x S1/S2-pane: arcs from `rounded` styles are emitted by the
+    /// server on the same corners B1 rounds, inside gap cells and padding. Gaps or padding
+    /// keep one rounded frame per pane, `pane_gap_cells = 0` shares dividers so only the
+    /// outer corners are arcs, frameless padding draws none, and B1 on top changes nothing.
+    /// Per state (inactive rounded, active heavy) only the unfocused frame is round.
+    #[tokio::test(flavor = "current_thread")]
+    async fn rounded_style_arcs_follow_pane_gap_cells_and_pane_padding() {
+        let build = || rounded_test_workspace(2, false);
+        let ui = |toml_text: &'static str, styles: [Option<&'static str>; 3]| {
+            move |config: &mut crate::config::Config| {
+                let parsed: crate::config::Config = toml::from_str(toml_text).expect("ui config");
+                config.ui = parsed.ui;
+                set_border_styles(config, styles[0], styles[1], styles[2]);
+            }
+        };
+        let rounded = [Some("rounded"), None, None];
+        let stock = [None, None, None];
+        for (spacing, arcs) in [
+            ("[ui]\n", "╭╭╮╮╯╯╰╰"),
+            ("[ui]\npane_gap_cells = 2\n", "╭╭╮╮╯╯╰╰"),
+            ("[ui]\npane_padding_cells = 1\n", "╭╭╮╮╯╯╰╰"),
+            (
+                "[ui]\npane_gap_cells = 2\npane_padding_cells = 1\n",
+                "╭╭╮╮╯╯╰╰",
+            ),
+            ("[ui]\npane_gap_cells = 0\n", "╭╮╯╰"),
+            ("[ui]\npane_borders = \"off\"\npane_padding_cells = 1\n", ""),
+            (
+                "[ui]\npane_borders = \"off\"\npane_gap_cells = 2\npane_padding_cells = 1\n",
+                "",
+            ),
+        ] {
+            let (server_arcs, server_and_client) = rounded_frame_pair(build, ui(spacing, rounded));
+            let (_, client_arcs) = rounded_frame_pair(build, ui(spacing, stock));
+            assert_eq!(
+                frame_glyphs(&server_arcs, ARCS),
+                sorted_glyphs(arcs),
+                "{spacing}"
+            );
+            assert_eq!(
+                server_arcs, server_and_client,
+                "B1 is idempotent: {spacing}"
+            );
+            assert_eq!(server_arcs, client_arcs, "server arcs = B1 arcs: {spacing}");
+        }
+        for spacing in [
+            "[ui]\npane_gap_cells = 2\n",
+            "[ui]\npane_padding_cells = 1\n",
+            "[ui]\npane_gap_cells = 2\npane_padding_cells = 1\n",
+        ] {
+            let per_state = [None, Some("heavy"), Some("rounded")];
+            let (server_only, with_client) = rounded_frame_pair(build, ui(spacing, per_state));
+            assert_eq!(server_only, with_client, "{spacing}");
+            assert_eq!(
+                frame_glyphs(&server_only, ARCS),
+                sorted_glyphs(ARCS),
+                "{spacing}"
+            );
+            assert_eq!(
+                frame_glyphs(&server_only, HEAVY_CORNERS),
+                sorted_glyphs(HEAVY_CORNERS),
+                "{spacing}"
+            );
+        }
+    }
+
+    /// Two side-by-side panes, left focused, from a real `App::new(config)`.
+    fn split_shell_app(
+        config: &crate::config::Config,
+    ) -> (crate::app::App, [crate::layout::PaneId; 2]) {
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::new(
+            config,
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let mut workspace = crate::workspace::Workspace::test_new("focus");
+        let left = workspace.tabs[0].root_pane;
+        let right = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        workspace.tabs[0].layout.focus_pane(left);
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        crate::ui::compute_view_with_runtime_registry(
+            &mut app.state,
+            &crate::terminal::TerminalRuntimeRegistry::new(),
+            Rect::new(0, 0, 40, 12),
+        );
+        (app, [left, right])
+    }
+
+    fn border_styles_app(
+        all: Option<&str>,
+        active: Option<&str>,
+    ) -> (crate::app::App, [crate::layout::PaneId; 2]) {
+        let mut config = crate::config::Config::default();
+        set_border_styles(&mut config, all, active, None);
+        let (app, panes) = split_shell_app(&config);
+        // The keys reach the renderer through `App::new` like `pane_gaps`.
+        assert_eq!(app.state.pane_border_styles, config.ui.pane_border_styles());
+        (app, panes)
+    }
+
+    fn border_styles_surface(app: &mut crate::app::App) -> RenderedPaneSurface {
+        let target = Some(crate::ui::TabSurfaceTarget {
+            workspace_index: 0,
+            tab_index: app.state.workspaces[0].active_tab_index(),
+        });
+        render_pane_surface(
+            app,
+            target,
+            Rect::new(0, 0, 40, 12),
+            true,
+            true,
+            crate::kitty_graphics::HostCellSize {
+                width_px: 1,
+                height_px: 1,
+            },
+            &crate::kitty_graphics::surface::DeliveryCache::default(),
+            1,
+        )
+        .expect("pane surface")
+    }
+
+    fn surface_corner(surface: &RenderedPaneSurface, pane_index: usize) -> &str {
+        let rect = surface.panes[pane_index].rect;
+        let index = usize::from(rect.y) * usize::from(surface.frame.width) + usize::from(rect.x);
+        &surface.frame.cells[index].symbol
+    }
+
+    /// Pane geometry with public ids cleared; each test app gets fresh ids.
+    fn anonymous_panes(surface: &RenderedPaneSurface) -> Vec<protocol::PaneSurfacePane> {
+        surface
+            .panes
+            .iter()
+            .cloned()
+            .map(|mut pane| {
+                pane.pane_id.clear();
+                pane
+            })
+            .collect()
+    }
+
+    /// Geometry, hit data, scrollbars, cursor and every non-symbol cell
+    /// attribute are unchanged; only stock line glyphs change.
+    fn assert_glyph_only_surface_change(plain: &RenderedPaneSurface, styled: &RenderedPaneSurface) {
+        assert_eq!(anonymous_panes(plain), anonymous_panes(styled));
+        assert_eq!(plain.splits, styled.splits);
+        assert_eq!(plain.frame.width, styled.frame.width);
+        assert_eq!(plain.frame.height, styled.frame.height);
+        assert_eq!(plain.frame.cursor, styled.frame.cursor);
+        let mut changed = 0;
+        for (before, after) in plain.frame.cells.iter().zip(&styled.frame.cells) {
+            assert_eq!(
+                (
+                    before.fg,
+                    before.bg,
+                    before.modifier,
+                    before.skip,
+                    before.hyperlink
+                ),
+                (
+                    after.fg,
+                    after.bg,
+                    after.modifier,
+                    after.skip,
+                    after.hyperlink
+                )
+            );
+            if before.symbol != after.symbol {
+                assert!("─│┌┐└┘├┤┬┴┼".contains(before.symbol.as_str()));
+                changed += 1;
+            }
+        }
+        assert!(changed > 0);
+    }
+
+    fn focus_right(app: &mut crate::app::App, left: crate::layout::PaneId) {
+        // Keyboard focus movement goes through `pane.focus_direction`.
+        app.handle_api_request(crate::api::schema::Request {
+            id: "keyboard".into(),
+            method: crate::api::schema::Method::PaneFocusDirection(
+                crate::api::schema::PaneFocusDirectionParams {
+                    pane_id: app.public_pane_id(0, left),
+                    direction: crate::api::schema::PaneDirection::Right,
+                },
+            ),
+        });
+    }
+
+    fn swapped_focus(panes: Vec<protocol::PaneSurfacePane>) -> Vec<protocol::PaneSurfacePane> {
+        panes
+            .into_iter()
+            .map(|mut pane| {
+                pane.focused = !pane.focused;
+                pane
+            })
+            .collect()
+    }
+
+    /// `pane_border_style_active = "heavy"` follows focus without moving geometry.
+    #[test]
+    fn pane_border_style_active_follows_keyboard_and_mouse_focus_with_unchanged_geometry() {
+        let (mut plain_app, _) = border_styles_app(None, None);
+        let (mut app, [left, right]) = border_styles_app(None, Some("heavy"));
+        let plain = border_styles_surface(&mut plain_app);
+        let surface = border_styles_surface(&mut app);
+        assert_glyph_only_surface_change(&plain, &surface);
+        let public_left = app.public_pane_id(0, left).unwrap();
+        let left_at = surface
+            .panes
+            .iter()
+            .position(|pane| pane.pane_id == public_left)
+            .unwrap();
+        let right_at = 1 - left_at;
+        assert_eq!(surface_corner(&plain, left_at), "┌");
+        assert_eq!(surface_corner(&surface, left_at), "┏");
+        assert_eq!(surface_corner(&surface, right_at), "┌");
+
+        focus_right(&mut app, left);
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(right));
+        let surface = border_styles_surface(&mut app);
+        assert_eq!(surface_corner(&surface, left_at), "┌");
+        assert_eq!(surface_corner(&surface, right_at), "┏");
+        assert_eq!(
+            anonymous_panes(&surface),
+            swapped_focus(anonymous_panes(&plain))
+        );
+
+        // A mouse click on a pane sends `pane.focus`.
+        app.handle_api_request(crate::api::schema::Request {
+            id: "mouse".into(),
+            method: crate::api::schema::Method::PaneFocus(crate::api::schema::PaneTarget {
+                pane_id: app.public_pane_id(0, left).unwrap(),
+            }),
+        });
+        assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(left));
+        let surface = border_styles_surface(&mut app);
+        assert_eq!(surface_corner(&surface, left_at), "┏");
+        assert_eq!(surface_corner(&surface, right_at), "┌");
+        assert_glyph_only_surface_change(&plain, &surface);
+    }
+
+    /// `pane_border_style = "heavy"` (+ `pane_border_style_active = "double"`)
+    /// keeps geometry and follows focus.
+    #[test]
+    fn pane_border_style_heavy_keeps_geometry_and_follows_focus() {
+        let (mut plain_app, _) = border_styles_app(None, None);
+        let plain = border_styles_surface(&mut plain_app);
+        for (active, focused_corner) in [(None, "┏"), (Some("double"), "╔")] {
+            let (mut app, [left, right]) = border_styles_app(Some("heavy"), active);
+            let surface = border_styles_surface(&mut app);
+            assert_glyph_only_surface_change(&plain, &surface);
+            let public_left = app.public_pane_id(0, left).unwrap();
+            let left_at = surface
+                .panes
+                .iter()
+                .position(|pane| pane.pane_id == public_left)
+                .unwrap();
+            let right_at = 1 - left_at;
+            assert_eq!(surface_corner(&plain, left_at), "┌");
+            assert_eq!(surface_corner(&surface, left_at), focused_corner);
+            assert_eq!(surface_corner(&surface, right_at), "┏");
+
+            focus_right(&mut app, left);
+            assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(right));
+            let surface = border_styles_surface(&mut app);
+            assert_eq!(surface_corner(&surface, left_at), "┏");
+            assert_eq!(surface_corner(&surface, right_at), focused_corner);
+            assert_eq!(
+                anonymous_panes(&surface),
+                swapped_focus(anonymous_panes(&plain))
+            );
+            assert_eq!(surface.splits, plain.splits);
+        }
+    }
+
+    #[test]
+    fn pane_border_styles_zoomed_pane_uses_the_active_style() {
+        let (mut plain_app, _) = border_styles_app(None, None);
+        plain_app.state.workspaces[0].tabs[0].zoomed = true;
+        let plain = border_styles_surface(&mut plain_app);
+        for (all, active, corner) in [
+            (None, Some("heavy"), "┏"),
+            (Some("heavy"), None, "┏"),
+            (Some("heavy"), Some("double"), "╔"),
+            (None, Some("rounded-dashed-2"), "╭"),
+        ] {
+            let (mut app, _) = border_styles_app(all, active);
+            app.state.workspaces[0].tabs[0].zoomed = true;
+            let surface = border_styles_surface(&mut app);
+            assert_eq!(surface.panes.len(), 1);
+            assert_glyph_only_surface_change(&plain, &surface);
+            assert_eq!(surface_corner(&plain, 0), "┌");
+            assert_eq!(surface_corner(&surface, 0), corner, "{all:?} {active:?}");
+        }
+    }
+
+    #[test]
+    fn split_hits_follow_configured_pane_gap_cells() {
+        let gaps = crate::ui::PaneGaps {
+            separate: true,
+            blank: 3,
+        };
+        let horizontal = crate::layout::SplitBorder {
+            pos: 20,
+            direction: ratatui::layout::Direction::Horizontal,
+            ratio: 0.5,
+            area: Rect::new(2, 3, 40, 12),
+            path: vec![false],
+        };
+        // Both frame edges plus the three blank cells taken from the leading pane.
+        assert_eq!(
+            split_hit_rect(&horizontal, true, gaps, &[]),
+            Some(Rect::new(16, 3, 5, 12))
+        );
+        // Frames off: only the blank cells.
+        assert_eq!(
+            split_hit_rect(&horizontal, false, gaps, &[]),
+            Some(Rect::new(17, 3, 3, 12))
+        );
+        let vertical = crate::layout::SplitBorder {
+            pos: 9,
+            direction: ratatui::layout::Direction::Vertical,
+            ratio: 0.5,
+            area: Rect::new(2, 3, 40, 12),
+            path: vec![true],
+        };
+        assert_eq!(
+            split_hit_rect(&vertical, true, gaps, &[]),
+            Some(Rect::new(2, 5, 40, 5))
+        );
+        assert_eq!(
+            split_hit_rect(&vertical, false, gaps, &[]),
+            Some(Rect::new(2, 6, 40, 3))
+        );
+        // A pane that could not give up its cells keeps the hit off its content.
+        assert_eq!(
+            split_hit_rect(&horizontal, false, gaps, &[Rect::new(2, 3, 18, 12)]),
+            None
+        );
+        // An effective gap of zero is the shared divider.
+        let shared = crate::ui::PaneGaps::default();
+        assert_eq!(
+            split_hit_rect(&horizontal, true, shared, &[]),
+            Some(Rect::new(20, 3, 1, 12))
+        );
+        assert_eq!(split_hit_rect(&horizontal, false, shared, &[]), None);
+    }
+
+    fn gap_test_runtime(label: &[u8]) -> crate::terminal::TerminalRuntime {
+        let mut bytes = Vec::new();
+        for line in 0..120 {
+            bytes.extend_from_slice(format!("line {line}\r\n").as_bytes());
+        }
+        bytes.extend_from_slice(label);
+        crate::terminal::TerminalRuntime::test_with_scrollback_bytes(80, 23, 1 << 20, &bytes)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn pane_gap_cells_follow_real_pane_geometry_through_the_client() {
+        const COLS: u16 = 100;
+        const ROWS: u16 = 30;
+        let mut config = crate::config::Config::default();
+        config.ui.pane_gap_cells = Some(toml::Value::Integer(3));
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = crate::app::App::new(
+            &config,
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        let mut workspace = crate::workspace::Workspace::test_new("gaps");
+        let left = workspace.tabs[0].root_pane;
+        workspace.insert_test_runtime(left, gap_test_runtime(b"LEFT"));
+        let right = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        workspace.insert_test_runtime(right, gap_test_runtime(b"RIGHT"));
+        let hidden = workspace.test_add_tab(None);
+        workspace.switch_tab(hidden);
+        let top = workspace.tabs[hidden].root_pane;
+        workspace.insert_test_runtime(top, gap_test_runtime(b"TOP"));
+        let bottom = workspace.test_split(ratatui::layout::Direction::Vertical);
+        workspace.insert_test_runtime(bottom, gap_test_runtime(b"BOTTOM"));
+        workspace.switch_tab(0);
+        app.state.workspaces = vec![workspace];
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        assert_eq!(app.state.pane_gap_cells, Some(3));
+
+        let mut client = crate::client::ClientShellState::new(
+            crate::client::ClientShellConfig::from_config(&config),
+        );
+        client.set_snapshot(Box::new(snapshot(&app, "boot", 1, None, None)));
+        let size = client.surface_size(COLS, ROWS);
+        let area = Rect::new(0, 0, size.cols, size.rows);
+        let target = |tab_index| {
+            Some(crate::ui::TabSurfaceTarget {
+                workspace_index: 0,
+                tab_index,
+            })
+        };
+        let cell_size = crate::kitty_graphics::HostCellSize {
+            width_px: 1,
+            height_px: 1,
+        };
+        let render = |app: &mut crate::app::App, area: Rect| {
+            render_pane_surface(
+                app,
+                target(0),
+                area,
+                true,
+                true,
+                cell_size,
+                &crate::kitty_graphics::surface::DeliveryCache::default(),
+                1,
+            )
+            .expect("pane surface")
+        };
+        let surface_rect =
+            |rect: protocol::SurfaceRect| Rect::new(rect.x, rect.y, rect.width, rect.height);
+        let dimensions = |app: &crate::app::App, pane| {
+            app.state.workspaces[0].test_runtimes[&pane]
+                .terminal_dimensions()
+                .expect("terminal dimensions")
+        };
+        // Every wire pane's PTY matches its content rect, so pointer origins line up.
+        // (The runtime floors PTYs at 4x2 cells, as at baseline.)
+        let assert_pty_matches_wire =
+            |app: &crate::app::App, panes: &[protocol::PaneSurfacePane]| {
+                for pane in panes {
+                    let (_, id) = app.parse_pane_id(&pane.pane_id).expect("pane id");
+                    let inner = surface_rect(pane.inner_rect);
+                    assert_eq!(
+                        dimensions(app, id),
+                        (inner.width.max(4), inner.height.max(2))
+                    );
+                    assert!(
+                        inner.x >= pane.rect.x && inner.right() <= pane.rect.x + pane.rect.width
+                    );
+                }
+            };
+
+        let rendered = render(&mut app, area);
+        assert_pty_matches_wire(&app, &rendered.panes);
+        let first_width = (f32::from(area.width) * 0.5).round() as u16;
+        let pane_rect = |rendered: &RenderedPaneSurface, id| {
+            let pane = rendered
+                .panes
+                .iter()
+                .find(|pane| app.parse_pane_id(&pane.pane_id).map(|(_, pane)| pane) == Some(id))
+                .expect("pane");
+            (
+                surface_rect(pane.rect),
+                surface_rect(pane.inner_rect),
+                pane.scrollbar_rect.map(surface_rect),
+            )
+        };
+        let (left_rect, left_inner, left_scrollbar) = pane_rect(&rendered, left);
+        let (right_rect, ..) = pane_rect(&rendered, right);
+        assert_eq!(left_rect, Rect::new(0, 0, first_width - 3, area.height));
+        assert_eq!(
+            right_rect,
+            Rect::new(first_width, 0, area.width - first_width, area.height)
+        );
+        // The scrollbar lane stays inside the pane frame, right of the PTY.
+        let scrollbar = left_scrollbar.expect("scrollback shows the scrollbar");
+        assert_eq!(scrollbar.x, left_inner.right());
+        assert_eq!(scrollbar.x, left_rect.right() - 2);
+        assert_eq!(left_inner.width, left_rect.width - 3);
+
+        // Split handle: both frame edges and the three blank cells.
+        assert_eq!(rendered.splits.len(), 1);
+        assert_eq!(rendered.splits[0].pos, first_width);
+        assert_eq!(
+            surface_rect(rendered.splits[0].hit_rect),
+            Rect::new(first_width - 4, 0, 5, area.height)
+        );
+        let row = |frame: &protocol::FrameData, y: u16, xs: std::ops::Range<u16>| {
+            xs.map(|x| {
+                frame.cells[usize::from(y * frame.width + x)]
+                    .symbol
+                    .as_str()
+            })
+            .collect::<String>()
+        };
+        assert_eq!(
+            row(&rendered.frame, 5, first_width - 4..first_width + 1),
+            "│   │"
+        );
+
+        let wire_panes = rendered.panes.clone();
+        client.set_pane_surface(protocol::PaneSurfaceFrame {
+            boot_id: "boot".into(),
+            projection_revision: 1,
+            surface_revision: 0,
+            frame: rendered.frame,
+            panes: rendered.panes,
+            splits: rendered.splits,
+            popup: rendered.popup,
+            graphics: rendered.graphics,
+        });
+        let composed = client.compose(COLS, ROWS).expect("composed frame").frame;
+        let symbols: Vec<&str> = composed
+            .cells
+            .iter()
+            .map(|cell| cell.symbol.as_str())
+            .collect();
+        assert!(symbols.windows(5).any(|w| w == ["│", " ", " ", " ", "│"]));
+
+        // Hidden tab PTYs get the same spaced geometry the tab will show.
+        crate::ui::resize_tab_surface(
+            &app.state,
+            &app.terminal_runtimes,
+            0,
+            hidden,
+            area,
+            cell_size,
+        );
+        let hidden_layout = crate::ui::compute_tab_surface_for(
+            &app.state,
+            &app.terminal_runtimes,
+            target(hidden),
+            area,
+            false,
+            cell_size,
+        );
+        assert_eq!(hidden_layout.pane_gaps.blank, 3);
+        let first_height = (f32::from(area.height) * 0.5).round() as u16;
+        for info in &hidden_layout.pane_infos {
+            assert_eq!(
+                dimensions(&app, info.id),
+                (info.inner_rect.width, info.inner_rect.height)
+            );
+        }
+        let top_info = hidden_layout
+            .pane_infos
+            .iter()
+            .find(|info| info.id == top)
+            .expect("top pane");
+        assert_eq!(top_info.rect.height, first_height - 3);
+
+        // Zoom shows one framed pane without spacing.
+        app.state.workspaces[0].tabs[0].zoomed = true;
+        let zoomed = render(&mut app, area);
+        assert_eq!(zoomed.panes.len(), 1);
+        assert!(zoomed.splits.is_empty());
+        assert_eq!(surface_rect(zoomed.panes[0].rect), area);
+        assert_pty_matches_wire(&app, &zoomed.panes);
+        app.state.workspaces[0].tabs[0].zoomed = false;
+
+        // Shrinking reduces the effective gap; re-expanding restores every PTY size.
+        let small = render(&mut app, Rect::new(0, 0, 12, 8));
+        assert_pty_matches_wire(&app, &small.panes);
+        for pane in &small.panes {
+            assert!(pane.inner_rect.width >= 1 && pane.inner_rect.height >= 1);
+        }
+        let restored = render(&mut app, area);
+        assert_pty_matches_wire(&app, &restored.panes);
+        assert_eq!(restored.panes.len(), wire_panes.len());
+        for (after, before) in restored.panes.iter().zip(&wire_panes) {
+            assert_eq!(after.rect, before.rect);
+            assert_eq!(after.inner_rect, before.inner_rect);
+            assert_eq!(after.scrollbar_rect, before.scrollbar_rect);
+        }
     }
 }
