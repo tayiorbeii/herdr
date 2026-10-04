@@ -89,6 +89,18 @@
           "description": "Set only the unfocused pane frame and pane border title color. When unset, follows the resolved overlay0. Matching pane_border_active removes the color-only focus difference; the focused title stays bold. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default foreground, not inheritance."
         },
         {
+          "key": "theme.custom.popup_bg",
+          "type": "color",
+          "default": "unset",
+          "description": "Set the terminal popup background (command and plugin popups): blank popup cells and popup terminal cells that use the default background. Explicit terminal backgrounds are kept. When unset, popup chrome follows panel_bg and terminal cells keep the terminal default. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default, not inheritance."
+        },
+        {
+          "key": "theme.custom.popup_border",
+          "type": "color",
+          "default": "unset",
+          "description": "Set the terminal popup border and title color (command and plugin popups). When unset, follows the resolved accent. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default, not inheritance."
+        },
+        {
           "key": "theme.custom.panel_bg",
           "type": "color",
           "default": "unset",
@@ -227,6 +239,18 @@
           "description": "Override the unfocused pane frame and title color only when auto_switch selects a light appearance. Omission inherits theme.custom.pane_border_inactive, or the resolved overlay0 if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default foreground, not inheritance."
         },
         {
+          "key": "theme.custom.light.popup_bg",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the terminal popup background only when auto_switch selects a light appearance. Omission inherits theme.custom.popup_bg, or the default popup background if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset is explicit, not inheritance."
+        },
+        {
+          "key": "theme.custom.light.popup_border",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the terminal popup border and title color only when auto_switch selects a light appearance. Omission inherits theme.custom.popup_border, or the resolved accent if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset is explicit, not inheritance."
+        },
+        {
           "key": "theme.custom.light.panel_bg",
           "type": "color",
           "default": "unset",
@@ -363,6 +387,18 @@
           "type": "color",
           "default": "unset",
           "description": "Override the unfocused pane frame and title color only when auto_switch selects a dark appearance. Omission inherits theme.custom.pane_border_inactive, or the resolved overlay0 if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset uses the terminal default foreground, not inheritance."
+        },
+        {
+          "key": "theme.custom.dark.popup_bg",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the terminal popup background only when auto_switch selects a dark appearance. Omission inherits theme.custom.popup_bg, or the default popup background if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset is explicit, not inheritance."
+        },
+        {
+          "key": "theme.custom.dark.popup_border",
+          "type": "color",
+          "default": "unset",
+          "description": "Override the terminal popup border and title color only when auto_switch selects a dark appearance. Omission inherits theme.custom.popup_border, or the resolved accent if both are unset. Accepts hex, named colors, rgb(r,g,b), or reset aliases; reset is explicit, not inheritance."
         },
         {
           "key": "theme.custom.dark.panel_bg",

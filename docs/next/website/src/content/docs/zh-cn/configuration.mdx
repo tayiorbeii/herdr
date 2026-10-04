@@ -276,6 +276,8 @@ active_tab_bg = "#89b4fa"
 pane_border_active = "#89b4fa"
 pane_border_inactive = "#6c7086"
 sidebar_bg = "#181825"
+popup_bg = "#181825"
+popup_border = "#89b4fa"
 active_row_bg = "#1e1e2e"
 selection_bg = "#313244"
 panel_bg = "reset"
@@ -292,6 +294,8 @@ yellow = "#f9e2af"
 
 `pane_border_active` 和 `pane_border_inactive` 仅更改已聚焦和未聚焦窗格的边框及窗格边框标题颜色，不影响标签页、弹出窗口、浮层、侧边栏或其他使用 `accent` 的位置。省略时，已聚焦窗格跟随解析后的 `accent`，未聚焦窗格跟随解析后的 `overlay0`，因此现有的 `accent` 和 `overlay0` 覆盖仍然生效。重置别名明确使用终端默认前景色，而不是继承。将两者设为相同值会有意消除已聚焦与未聚焦窗格之间的颜色差异；已聚焦窗格的标题仍保持粗体。模式子表中省略的字段继承 `[theme.custom]`，且仅在启用 `auto_switch` 时生效。实时重载配置即可应用更改，移除覆盖会恢复默认色。
 
+`popup_bg` 和 `popup_border` 用于由弹窗命令或 `placement = "popup"` 的插件窗格打开的终端弹窗。`popup_bg` 会填充弹窗中的空白单元格，以及使用默认背景的弹窗终端单元格；程序显式设置的背景色保持不变。`popup_border` 设置弹窗边框及其标题的颜色。省略时，弹窗框架保留解析后的 `panel_bg` 背景和 `accent` 边框，弹窗终端单元格保留终端默认背景。重置别名明确使用终端默认色，而不是继承。窗格、标签页、浮层以及其他 `accent` 用途不受影响。
+
 颜色值支持十六进制（`#rgb` 或 `#rrggbb`）、命名颜色、`rgb(r,g,b)`，以及 `reset`、`default`、`none`、`transparent` 等重置别名。
 
 启用 `auto_switch` 后，可以通过明暗模式子表在共享自定义颜色之上应用不同的覆盖值：
@@ -304,6 +308,7 @@ accent = "#89b4fa"
 active_tab_fg = "#eff1f5"
 active_tab_bg = "#1e66f5"
 pane_border_active = "#1e66f5"
+popup_border = "#1e66f5"
 panel_bg = "#eff1f5"
 text = "#4c4f69"
 
@@ -311,11 +316,13 @@ text = "#4c4f69"
 active_tab_fg = "#181825"
 active_tab_bg = "#89b4fa"
 pane_border_active = "#89b4fa"
+popup_border = "#89b4fa"
 panel_bg = "#1e1e2e"
 text = "#cdd6f4"
 ```
 
 有效调色板按以下顺序应用：内置主题、`[theme.custom]`，然后是 `[theme.custom.light]` 或 `[theme.custom.dark]`。省略模式字段时继承公共值；公共活动标签颜色也省略时，使用上述动态默认色。禁用 `auto_switch` 时忽略模式覆盖。首次加载、实时重载配置和宿主外观变化使用同一解析逻辑。重载时移除活动标签颜色覆盖会恢复继承或默认色。
+有效调色板按以下顺序应用：内置主题、`[theme.custom]`，然后是 `[theme.custom.light]` 或 `[theme.custom.dark]`。省略模式子表时，会保留现有的共享覆盖行为。省略模式弹窗字段时继承公共值。首次加载、实时重载配置和宿主外观变化使用同一解析逻辑，重载时移除弹窗颜色覆盖会恢复默认弹窗颜色。
 
 ## UI 与侧边栏
 
