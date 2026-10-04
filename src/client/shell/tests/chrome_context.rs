@@ -652,3 +652,34 @@ fn close_confirmation_error_becomes_client_owned_overlay_and_stable_workspace_cl
             if params.workspace_id == "ws_1" && !params.close_group
     ));
 }
+
+#[test]
+fn pane_border_colors_leave_client_tab_bar_and_popup_chrome_unchanged() {
+    // Pane frames are drawn server-side; client tabs, sidebar and popup chrome keep reading accent.
+    let config: Config = toml::from_str(
+        r##"
+[theme.custom]
+pane_border_active = "red"
+pane_border_inactive = "green"
+[theme.custom.dark]
+pane_border_active = "reset"
+"##,
+    )
+    .unwrap();
+    let overridden = ClientShellConfig::from_config(&config);
+    let baseline = ClientShellConfig::from_config(&Config::default());
+    assert_eq!(
+        overridden.palette.pane_border_active,
+        Some(ratatui::style::Color::Red)
+    );
+    assert_eq!(overridden.palette.accent, baseline.palette.accent);
+    assert_eq!(overridden.palette.overlay0, baseline.palette.overlay0);
+
+    let compose = |config: ClientShellConfig| {
+        let mut state = ClientShellState::new(config);
+        state.set_snapshot(Box::new(snapshot()));
+        state.set_pane_surface(surface_with_popup());
+        state.compose(106, 20).expect("popup frame").frame.clone()
+    };
+    assert_eq!(compose(overridden), compose(baseline));
+}
