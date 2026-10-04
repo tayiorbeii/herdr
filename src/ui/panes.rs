@@ -160,9 +160,15 @@ fn resolve_pane_tokens(
         .collect()
 }
 
-// Unfocused pane frame colour. Every inactive line fallback goes through here.
+// Unfocused pane frame colour. Every inactive line fallback goes through here:
+// FC1's `pane_border_inactive` when set, else overlay0.
 fn pane_border_inactive_color(palette: &Palette) -> Color {
-    palette.overlay0
+    palette.pane_border_inactive.unwrap_or(palette.overlay0)
+}
+
+// Focused pane frame colour: FC1's `pane_border_active` when set, else accent.
+fn pane_border_active_color(palette: &Palette) -> Color {
+    palette.pane_border_active.unwrap_or(palette.accent)
 }
 
 // An unfocused pane's identity line colour: the configured token's explicit fg when the token
@@ -187,7 +193,7 @@ fn pane_border_identity_color(
 }
 
 // Line colour from one walk over the cell's owners (the panes `line_touches_pane` accepts):
-// any focused owner wins with accent; otherwise the cell takes an identity colour only when
+// any focused owner wins with the active colour; otherwise the cell takes an identity colour only when
 // every owner has one and they agree, else the inactive fallback.
 fn identity_line_color(
     palette: &Palette,
@@ -204,7 +210,7 @@ fn identity_line_color(
             continue;
         }
         if info.is_focused {
-            return palette.accent;
+            return pane_border_active_color(palette);
         }
         // Keep walking after a disagreement: a later owner may still be focused.
         match (*identity, agreed) {
@@ -993,9 +999,9 @@ fn render_pane_borders(
 /// Pane frame and title focus color; absent overrides follow accent / overlay0.
 fn pane_border_color(palette: &Palette, focused: bool) -> Color {
     if focused {
-        palette.pane_border_active.unwrap_or(palette.accent)
+        pane_border_active_color(palette)
     } else {
-        palette.pane_border_inactive.unwrap_or(palette.overlay0)
+        pane_border_inactive_color(palette)
     }
 }
 
@@ -4526,6 +4532,63 @@ mod tests {
         assert_eq!(fg_at(&buffer, right_x, 2), BUILD_FG);
         assert_eq!(fg_at(&buffer, right_x, shared_y), Color::Reset);
         assert_eq!(fg_at(&buffer, right_x, shared_y + 2), Color::Reset);
+    }
+
+    /// C2 x FC1: with all three keys set, focus takes `pane_border_active`, an
+    /// identity colour beats `pane_border_inactive`, and every inactive fallback
+    /// (no identity, disagreeing owners) takes `pane_border_inactive`.
+    #[test]
+    fn pane_border_identity_composes_with_focus_color_overrides() {
+        let active = Color::Rgb(0xff, 0x00, 0x00);
+        let inactive = Color::Rgb(0x00, 0x00, 0xff);
+        let (mut app, [root, top, bottom]) = identity_test_app();
+        set_tokens(title_terminal(&mut app, root), &[("role", "review")]);
+        set_tokens(title_terminal(&mut app, top), &[("role", "build")]);
+        set_tokens(title_terminal(&mut app, bottom), &[("role", "none")]);
+        app.palette.pane_border_active = Some(active);
+        app.palette.pane_border_inactive = Some(inactive);
+        app.pane_border_identity_token = Some(role_identity_token());
+        let area = IDENTITY_AREA;
+        let top_rect = title_pane_rect(&app, area, top);
+        let bottom_rect = title_pane_rect(&app, area, bottom);
+        let mid_x = top_rect.x + top_rect.width / 2;
+        let right_x = area.width - 1;
+        let shared_y = bottom_rect.y;
+        let bottom_y = area.height - 1;
+
+        let buffer = render_title_tab(&app, area);
+        // Focus wins with the FC1 active colour, including the divider it shares.
+        assert_eq!(fg_at(&buffer, 0, 2), active);
+        assert_eq!(fg_at(&buffer, top_rect.x, 2), active);
+        // An identity colour wins over the FC1 inactive colour.
+        assert_eq!(fg_at(&buffer, right_x, 2), BUILD_FG);
+        // No identity on `bottom`, and the top/bottom shared row disagrees: FC1 inactive.
+        assert_eq!(fg_at(&buffer, mid_x, bottom_y), inactive);
+        assert_eq!(fg_at(&buffer, mid_x, shared_y), inactive);
+        assert_eq!(fg_at(&buffer, right_x, shared_y), inactive);
+        // Titles follow the same FC1 colours; no raw accent/overlay0 is left.
+        for y in 0..area.height {
+            for x in 0..area.width {
+                let fg = fg_at(&buffer, x, y);
+                if buffer[(x, y)].symbol() != " " {
+                    assert_ne!(fg, app.palette.accent, "raw accent at ({x}, {y})");
+                    assert_ne!(fg, app.palette.overlay0, "raw overlay0 at ({x}, {y})");
+                }
+            }
+        }
+
+        // Moving focus: the newly focused pane takes active, root keeps its identity.
+        app.workspaces[0].tabs[0].layout.focus_pane(top);
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(fg_at(&buffer, right_x, 2), active);
+        assert_eq!(fg_at(&buffer, 0, 2), REVIEW_FG);
+        assert_eq!(fg_at(&buffer, mid_x, bottom_y), inactive);
+
+        // Removing the identity key leaves the plain FC1 focus colours.
+        app.pane_border_identity_token = None;
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(fg_at(&buffer, right_x, 2), active);
+        assert_eq!(fg_at(&buffer, 0, 2), inactive);
     }
 
     #[test]
