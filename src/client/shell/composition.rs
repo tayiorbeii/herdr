@@ -142,6 +142,7 @@ impl ClientShellState {
                 notice,
                 1,
                 &self.config.palette,
+                self.config.rounded_borders,
             );
         }
         FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, None, &[])
@@ -344,6 +345,9 @@ impl ClientShellState {
             frame.cells[start..start + usize::from(bar.width)].to_vec()
         });
         blit_pane_surface(&mut frame, &surface.frame, layout.pane_surface);
+        if self.config.rounded_borders {
+            super::borders::round_pane_corners(&mut frame, &surface.panes, layout.pane_surface);
+        }
         restore_mode_bar(&mut frame, mode_bar, mode_bar_cells.as_deref());
         let mut occlusion = crate::kitty_graphics::surface::Occlusion::default();
         let has_selection = self
@@ -499,6 +503,7 @@ impl ClientShellState {
                         notice,
                         u16::from(has_config_diagnostic) + lifecycle_offset,
                         &self.config.palette,
+                        self.config.rounded_borders,
                     )
                 } else {
                     endpoint_notices::render_mobile_banner(
@@ -518,6 +523,7 @@ impl ClientShellState {
                         self.config.toast_position,
                         u16::from(has_config_diagnostic) + lifecycle_offset,
                         &self.config.palette,
+                        self.config.rounded_borders,
                     )
                 } else {
                     notifications::render_mobile_notification_banner(
@@ -555,6 +561,7 @@ impl ClientShellState {
                 offset,
                 self.config.clipboard_toast_position,
                 &self.config.palette,
+                self.config.rounded_borders,
             ));
             frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
         }
@@ -569,6 +576,9 @@ impl ClientShellState {
                 let mut composed = frame.to_ratatui_buffer()?;
                 let block = ratatui::widgets::Block::default()
                     .borders(ratatui::widgets::Borders::ALL)
+                    .border_type(crate::ui::interface_border_type(
+                        self.config.rounded_borders,
+                    ))
                     .border_style(ratatui::style::Style::default().fg(self.config.palette.accent))
                     .title(popup.title.clone())
                     .style(ratatui::style::Style::default().bg(self.config.palette.panel_bg));
@@ -647,6 +657,9 @@ impl ClientShellState {
             let cursor = if let ClientShellOverlay::ContextMenu(menu) = overlay {
                 let rendered =
                     render::render_context_menu(&mut composed, menu, &self.config.palette)?;
+                if self.config.rounded_borders {
+                    crate::ui::round_buffer_corners(&mut composed, rendered.area);
+                }
                 occlusion.cover(rendered.area);
                 self.hits.context_menu_rows = rendered.menu_rows;
                 None
@@ -658,6 +671,9 @@ impl ClientShellState {
                     snapshot,
                     &self.config.palette,
                 )?;
+                if self.config.rounded_borders {
+                    crate::ui::round_buffer_corners(&mut composed, rendered.area);
+                }
                 occlusion.cover(rendered.area);
                 self.hits.global_menu_rows = rendered.menu_rows;
                 None
@@ -671,6 +687,10 @@ impl ClientShellState {
                     &self.config.keybinds,
                     &self.config.palette,
                 )?;
+                if self.config.rounded_borders {
+                    crate::ui::round_buffer_corners(&mut composed, rendered.area);
+                    crate::ui::round_buffer_corners(&mut composed, rendered.navigator_popup);
+                }
                 occlusion.cover(rendered.area);
                 self.hits.overlay_primary = rendered.primary;
                 self.hits.overlay_clear = rendered.clear;

@@ -304,6 +304,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Disable for tmux-style internal splitters without an outside frame.
 # pane_outer_borders = true
 
+# Opt in to rounded light corners on existing interface frames; no geometry changes.
+# Shared junctions and double/heavy borders retain their square glyphs.
+# rounded_borders = false
+
 # Draw interactive scrollbars beside terminal panes.
 # Set false to reclaim the scrollbar column and keep it out of terminal-native selections.
 # pane_scrollbars = true
