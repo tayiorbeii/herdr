@@ -84,6 +84,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Override individual color tokens on top of the base theme.
 # Accepts: hex (#rrggbb), named colors, rgb(r,g,b), or panel_bg = "reset"
 # [theme.custom]
+# Focused tab only; omitted fg follows panel contrast, omitted bg follows accent.
+# Reset aliases use terminal defaults rather than inheriting a color.
+# active_tab_fg = "#181825"
+# active_tab_bg = "#89b4fa"
 # sidebar_bg = "#181825"
 # active_row_bg = "#1e1e2e"
 # selection_bg = "#313244"
@@ -94,10 +98,14 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 
 # Layer appearance-specific overrides on top when auto_switch is enabled.
 # [theme.custom.light]
+# active_tab_fg = "#eff1f5"
+# active_tab_bg = "#1e66f5"
 # panel_bg = "#eff1f5"
 # text = "#4c4f69"
 #
 # [theme.custom.dark]
+# active_tab_fg = "#181825"
+# active_tab_bg = "#89b4fa"
 # panel_bg = "#1e1e2e"
 # text = "#cdd6f4"
 
