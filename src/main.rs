@@ -340,6 +340,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Small windows shrink the gap only as needed to keep every pane usable.
 # pane_gap_cells = 1
 
+# Empty cells between each pane's frame (or edge) and its terminal content.
+# Shrinks on small panes so the terminal keeps 4 columns and 2 rows; the scrollbar keeps its column.
+# pane_padding_cells = 0
+
 # Show detected/reported agent labels in split pane borders when no manual pane name is set.
 # show_agent_labels_on_pane_borders = false
 

@@ -67,6 +67,9 @@ const TERMINAL_COMPRESSION_IDLE: std::time::Duration = std::time::Duration::from
 const TERMINAL_COMPRESSION_STEP: std::time::Duration = std::time::Duration::from_millis(1);
 pub(crate) const PANE_TERM: &str = crate::ghostty::TERM;
 const PANE_COLORTERM: &str = "truecolor";
+/// Smallest PTY size `PaneRuntime::resize` applies; smaller requests are raised to it.
+pub(crate) const MIN_PTY_ROWS: u16 = 2;
+pub(crate) const MIN_PTY_COLS: u16 = 4;
 
 fn terminal_compression_permits() -> Arc<tokio::sync::Semaphore> {
     static PERMITS: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
@@ -3184,8 +3187,8 @@ impl PaneRuntime {
 
     /// Resize if the dimensions actually changed.
     pub fn resize(&self, rows: u16, cols: u16, cell_width_px: u32, cell_height_px: u32) {
-        let rows = rows.max(2);
-        let cols = cols.max(4);
+        let rows = rows.max(MIN_PTY_ROWS);
+        let cols = cols.max(MIN_PTY_COLS);
         let size = (rows, cols, cell_width_px, cell_height_px);
         if self.current_size.get() == size {
             return;

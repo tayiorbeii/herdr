@@ -826,8 +826,14 @@ impl HeadlessServer {
     fn reload_server_config(&mut self, notify_success: bool) -> crate::config::ConfigReloadReport {
         let server_keybindings = self.server_keybindings.clone();
         apply_keybindings(&mut self.app, &server_keybindings);
+        let previous_pane_padding = self.app.state.pane_padding_cells;
         let report = self.app.apply_config_from_disk(notify_success);
         self.app.take_config_reloaded_from_disk();
+        if self.app.state.pane_padding_cells != previous_pane_padding {
+            // Padding changes every PTY content rect without a client geometry
+            // change, so resize the viewed tabs now.
+            self.reapply_controlled_shell_tab_geometry(false);
+        }
         self.server_keybindings = app_keybindings(&self.app);
         self.headless_size = self.app.state.headless_size;
         let (server_config_diagnostic, server_config_diagnostic_without_keybindings) =

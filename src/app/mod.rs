@@ -494,6 +494,7 @@ impl App {
             pane_focus_weight: config.ui.pane_focus_weight,
             pane_heavy_borders: config.ui.pane_heavy_borders,
             pane_gap_cells: config.ui.pane_gap_cells(),
+            pane_padding_cells: config.ui.pane_padding_cells(),
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: String::new(),
@@ -837,6 +838,7 @@ impl App {
                     &config.ui.window_title,
                 ));
                 diagnostics.extend(config.ui.invalid_pane_gap_cells_diagnostic());
+                diagnostics.extend(config.ui.pane_padding_cells_diagnostic());
 
                 self.loaded_host_cursor = config.ui.host_cursor;
                 self.state.confirm_close = config.ui.confirm_close;
@@ -847,6 +849,7 @@ impl App {
                 self.state.pane_focus_weight = config.ui.pane_focus_weight;
                 self.state.pane_heavy_borders = config.ui.pane_heavy_borders;
                 self.state.pane_gap_cells = config.ui.pane_gap_cells();
+                self.state.pane_padding_cells = config.ui.pane_padding_cells();
                 self.state.show_agent_labels_on_pane_borders =
                     config.ui.show_agent_labels_on_pane_borders;
                 self.configure_tab_bar_status(
@@ -2239,6 +2242,48 @@ pane_border_inactive = "reset"
             app.state.config_diagnostic.as_deref(),
             Some("config.toml; herdr config check")
         );
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_config_applies_pane_padding_and_removal_restores_baseline() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-pane-padding");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let mut app = test_app();
+        assert_eq!(app.state.pane_padding_cells, 0);
+
+        std::fs::write(&path, "[ui]\npane_padding_cells = 2\n").unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert_eq!(app.state.pane_padding_cells, 2);
+
+        // A malformed value disables only padding; sibling [ui] keys still apply.
+        std::fs::write(
+            &path,
+            "[ui]\npane_padding_cells = \"wide\"\npane_borders = \"always\"\n",
+        )
+        .unwrap();
+        let report = app.reload_config();
+        assert_ne!(report.status, crate::config::ConfigReloadStatus::Failed);
+        assert!(report.diagnostics.iter().any(|diagnostic| diagnostic
+            == "ui.pane_padding_cells = \"wide\" is not a whole number of cells from 0 to 65535; disabling pane padding"));
+        assert_eq!(app.state.pane_padding_cells, 0);
+        assert_eq!(
+            app.state.pane_borders,
+            crate::config::PaneBordersConfig::Always
+        );
+
+        std::fs::write(&path, "[ui]\npane_padding_cells = 3\n").unwrap();
+        app.reload_config();
+        assert_eq!(app.state.pane_padding_cells, 3);
+        std::fs::write(&path, "").unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert_eq!(app.state.pane_padding_cells, 0);
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
