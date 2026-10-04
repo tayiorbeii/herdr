@@ -113,6 +113,7 @@ pub(super) fn render_notification_card(
     top_offset: u16,
     dot_color: Color,
     palette: &Palette,
+    rounded_borders: bool,
 ) -> Rect {
     if area.is_empty() {
         return Rect::default();
@@ -144,6 +145,7 @@ pub(super) fn render_notification_card(
     Clear.render(rect, buffer);
     let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(crate::ui::interface_border_type(rounded_borders))
         .border_style(Style::default().fg(palette.overlay0))
         .style(Style::default().bg(palette.panel_bg));
     let inner = block.inner(rect);
@@ -184,6 +186,7 @@ pub(super) fn render_visible_notification(
     default_position: crate::config::ToastHerdrPosition,
     top_offset: u16,
     palette: &Palette,
+    rounded_borders: bool,
 ) -> Rect {
     let event = &notification.event;
     let dot_color = match event.kind {
@@ -202,6 +205,7 @@ pub(super) fn render_visible_notification(
         top_offset,
         dot_color,
         palette,
+        rounded_borders,
     )
 }
 
@@ -470,6 +474,7 @@ mod tests {
                     position,
                     1,
                     &palette,
+                    false,
                 );
                 assert!(rect.y >= area.y);
                 assert!(rect.bottom() <= area.bottom());

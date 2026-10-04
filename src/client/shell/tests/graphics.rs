@@ -201,6 +201,7 @@ fn notifications_and_clipboard_feedback_only_cover_their_drawn_corners() {
                 0,
                 position,
                 &state.config.palette,
+                state.config.rounded_borders,
             );
             assert_graphics_cover(&mut state, rect, cols, rows);
         }
@@ -386,6 +387,45 @@ fn every_dialog_and_menu_occludes_its_panel_not_the_whole_screen() {
                     .contains("a=d,d=i")
             );
         }
+        let hits = (
+            state.hits.overlay_primary,
+            state.hits.overlay_cancel,
+            state.hits.context_menu_rows.clone(),
+            state.hits.global_menu_rows.clone(),
+        );
+        state.config.rounded_borders = true;
+        let rounded = state.compose(106, 40).unwrap();
+        let corners = [
+            (area.x, area.y),
+            (area.right() - 1, area.y),
+            (area.x, area.bottom() - 1),
+            (area.right() - 1, area.bottom() - 1),
+        ];
+        for (index, cell) in rounded.frame.cells.iter().enumerate() {
+            let point = ((index % 106) as u16, (index / 106) as u16);
+            let mut expected = frame.frame.cells[index].clone();
+            if corners.contains(&point) {
+                expected.symbol = crate::ui::rounded_light_corner(&expected.symbol)
+                    .expect("existing light frame corner")
+                    .into();
+            }
+            assert_eq!(
+                cell, &expected,
+                "point={point:?} overlay={:?}",
+                state.overlay
+            );
+        }
+        assert_eq!(
+            (
+                state.hits.overlay_primary,
+                state.hits.overlay_cancel,
+                state.hits.context_menu_rows.clone(),
+                state.hits.global_menu_rows.clone()
+            ),
+            hits
+        );
+        state.config.rounded_borders = false;
+        assert_eq!(state.compose(106, 40).unwrap().frame, frame.frame);
         state.overlay = None;
         let restored = state.compose(106, 40).unwrap();
         assert!(is_placed(
@@ -549,4 +589,98 @@ fn popup_terminal_keeps_own_graphics_and_hides_only_background_overlap() {
         inside
     ));
     assert!(!String::from_utf8_lossy(&frame.graphics.clone().into_inline_bytes()).contains("a=t"));
+}
+
+#[test]
+fn rounded_borders_round_popup_notice_and_copy_feedback_frames_only() {
+    fn corners(rect: Rect) -> [(u16, u16); 4] {
+        [
+            (rect.x, rect.y),
+            (rect.right() - 1, rect.y),
+            (rect.x, rect.bottom() - 1),
+            (rect.right() - 1, rect.bottom() - 1),
+        ]
+    }
+    fn assert_only_frame_corners_round(
+        state: &mut ClientShellState,
+        frame_rect: impl Fn(&ClientShellState) -> Rect,
+        cols: u16,
+        rows: u16,
+    ) {
+        state.config.rounded_borders = false;
+        let square = state.compose(cols, rows).unwrap().frame;
+        let square_rect = frame_rect(state);
+        state.config.rounded_borders = true;
+        let rounded = state.compose(cols, rows).unwrap().frame;
+        assert_eq!(frame_rect(state), square_rect);
+        assert!(square_rect.width >= 2 && square_rect.height >= 2);
+        let expected_corners = corners(square_rect);
+        for (index, cell) in rounded.cells.iter().enumerate() {
+            let point = (
+                (index % usize::from(cols)) as u16,
+                (index / usize::from(cols)) as u16,
+            );
+            let mut expected = square.cells[index].clone();
+            if expected_corners.contains(&point) {
+                expected.symbol = crate::ui::rounded_light_corner(&expected.symbol)
+                    .expect("existing light frame corner")
+                    .into();
+            }
+            assert_eq!(cell, &expected, "point={point:?}");
+        }
+        assert_eq!(rounded.cursor, square.cursor);
+        state.config.rounded_borders = false;
+        assert_eq!(state.compose(cols, rows).unwrap().frame, square);
+    }
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface_with_popup());
+    assert_only_frame_corners_round(
+        &mut state,
+        |state| {
+            let popup = state.hits.popup.clone().expect("popup hit");
+            assert!(popup.inner_rect.x > popup.rect.x);
+            popup.rect
+        },
+        106,
+        20,
+    );
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.visible_endpoint_notice = Some(ClientVisibleEndpointNotice {
+        key: ClientEndpointNoticeKey {
+            boot_id: "boot-1".into(),
+            kind: ClientEndpointNoticeKind::Rejected,
+            code: "test".into(),
+        },
+        title: "error".into(),
+        body: "body".into(),
+        deadline: std::time::Instant::now(),
+    });
+    assert_only_frame_corners_round(&mut state, |state| state.hits.notification_toast, 106, 20);
+
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.sidebar_collapsed = true;
+    state.set_snapshot(Box::new(snapshot()));
+    state.set_pane_surface(surface());
+    state.copy_feedback = Some(crate::app::state::CopyFeedback {
+        message: "copied".into(),
+    });
+    let feedback_rect = |state: &ClientShellState| {
+        let layout = state.layout(106, 20);
+        let mut buffer = Buffer::empty(Rect::new(0, 0, 106, 20));
+        crate::ui::render_copy_feedback_buffer(
+            &mut buffer,
+            layout.pane_surface,
+            state.copy_feedback.as_ref().unwrap(),
+            0,
+            state.config.clipboard_toast_position,
+            &state.config.palette,
+            false,
+        )
+    };
+    assert_only_frame_corners_round(&mut state, feedback_rect, 106, 20);
 }
