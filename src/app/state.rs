@@ -991,6 +991,8 @@ pub struct AppState {
     pub pane_gaps: bool,
     /// Draw the focused pane's border arms with heavy glyphs (`ui.pane_focus_weight`).
     pub pane_focus_weight: bool,
+    /// Draw every pane border with heavy glyphs (`ui.pane_heavy_borders`).
+    pub pane_heavy_borders: bool,
     pub show_agent_labels_on_pane_borders: bool,
     pub tab_bar_right: Vec<TabBarStatusSegment>,
     pub tab_bar_right_separator: String,
@@ -1218,6 +1220,7 @@ impl AppState {
             pane_scrollbars: true,
             pane_gaps: false,
             pane_focus_weight: false,
+            pane_heavy_borders: false,
             show_agent_labels_on_pane_borders: false,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: " ".into(),
