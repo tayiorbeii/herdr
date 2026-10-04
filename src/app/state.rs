@@ -1000,6 +1000,7 @@ pub struct AppState {
     pub show_agent_labels_on_pane_borders: bool,
     pub pane_title_tokens: Option<Vec<crate::config::AgentSidebarToken>>,
     pub pane_manual_label_first: bool,
+    pub pane_border_identity_token: Option<crate::config::AgentSidebarToken>,
     pub tab_bar_right: Vec<TabBarStatusSegment>,
     pub tab_bar_right_separator: String,
     /// Expose the focused pane's cursor anchor to the outer terminal even when
@@ -1256,6 +1257,7 @@ impl AppState {
             show_agent_labels_on_pane_borders: false,
             pane_title_tokens: None,
             pane_manual_label_first: false,
+            pane_border_identity_token: None,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: " ".into(),
             reveal_hidden_cursor_for_cjk_ime: false,
