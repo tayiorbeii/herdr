@@ -123,6 +123,7 @@ impl Config {
             .chain(window_title_diagnostics(&self.ui.window_title))
             .chain(self.ui.invalid_pane_gap_cells_diagnostic())
             .chain(self.ui.pane_padding_cells_diagnostic())
+            .chain(self.ui.sidebar_padding_cells.diagnostic())
             .chain(self.invalid_sidebar_bounds_diagnostic())
             .chain(self.invalid_headless_size_diagnostic())
             .collect()
