@@ -7,12 +7,16 @@ use ratatui::{
 };
 
 use super::scrollbar::{render_pane_scrollbar, should_show_scrollbar};
+use super::sidebar::{
+    apply_token_style, sidebar_agent_row, sidebar_token_separator, AgentTokenContext, ResolvedToken,
+};
 #[cfg(test)]
 use super::text::display_width;
 use super::text::truncate_end;
 use super::widgets::panel_contrast_fg;
 use crate::app::state::Palette;
 use crate::app::AppState;
+use crate::config::AgentSidebarToken;
 use crate::layout::PaneInfo;
 use crate::popup_size::resolve_popup_geometry;
 use crate::terminal::{TerminalRuntime, TerminalRuntimeRegistry};
@@ -29,6 +33,193 @@ fn pane_border_title(label: &str, pane_width: u16, _focused: bool) -> Option<Str
     }
     let max_label_width = pane_width.saturating_sub(4) as usize;
     Some(format!(" {} ", truncate_end(label, max_label_width)))
+}
+
+enum PaneBorderTitle {
+    Plain(String),
+    Composed(Vec<ratatui::text::Span<'static>>),
+}
+
+fn pane_border_title_base_style(palette: &Palette, focused: bool) -> Style {
+    let mut style = Style::default().fg(pane_border_color(palette, focused));
+    if focused {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    style
+}
+
+// Title source order: opt-in manual label, then the configured token row, then the
+// baseline effective title -> manual label -> gated identity chain.
+fn pane_border_title_for(
+    app: &AppState,
+    ws: &crate::workspace::Workspace,
+    info: &PaneInfo,
+) -> Option<PaneBorderTitle> {
+    let terminal = ws
+        .pane_state(info.id)
+        .and_then(|pane| app.terminals.get(&pane.attached_terminal_id))?;
+    if app.pane_manual_label_first {
+        if let Some(label) = terminal
+            .manual_label
+            .as_deref()
+            .filter(|label| !label.trim().is_empty())
+        {
+            return pane_border_title(label, info.rect.width, info.is_focused)
+                .map(PaneBorderTitle::Plain);
+        }
+    }
+    if let Some(row) = app.pane_title_tokens.as_deref() {
+        if let Some(spans) = composed_pane_border_title(app, ws, info, terminal, row) {
+            return Some(PaneBorderTitle::Composed(spans));
+        }
+    }
+    terminal
+        .border_label(app.show_agent_labels_on_pane_borders)
+        .and_then(|label| pane_border_title(&label, info.rect.width, info.is_focused))
+        .map(PaneBorderTitle::Plain)
+}
+
+fn row_uses(row: &[AgentSidebarToken], token: AgentSidebarToken) -> bool {
+    row.iter().any(|configured| *configured.parts().0 == token)
+}
+
+// Resolves the configured row with the sidebar resolver against server-side pane data.
+// Status and machine tokens are client presentation, so they resolve as missing here.
+fn composed_pane_border_title(
+    app: &AppState,
+    ws: &crate::workspace::Workspace,
+    info: &PaneInfo,
+    terminal: &crate::terminal::TerminalState,
+    row: &[AgentSidebarToken],
+) -> Option<Vec<ratatui::text::Span<'static>>> {
+    if info.rect.width <= 4 {
+        return None;
+    }
+    let workspace = if row_uses(row, AgentSidebarToken::Workspace) {
+        ws.display_name_from_terminals(&app.terminals)
+    } else {
+        String::new()
+    };
+    let tab = row_uses(row, AgentSidebarToken::Tab)
+        .then(|| ws.find_tab_index_for_pane(info.id))
+        .flatten()
+        .filter(|tab_idx| ws.tabs.len() > 1 || !ws.tabs[*tab_idx].is_auto_named())
+        .and_then(|tab_idx| ws.tab_display_name(tab_idx));
+    let title = terminal.effective_title();
+    let pane = row_uses(row, AgentSidebarToken::Pane)
+        .then(|| title.clone().or_else(|| terminal.manual_label.clone()))
+        .flatten();
+    let agent = row_uses(row, AgentSidebarToken::Agent)
+        .then(|| {
+            terminal
+                .effective_display_agent()
+                .or_else(|| terminal.agent_name.clone())
+                .or_else(|| terminal.effective_agent_label().map(str::to_string))
+                .or_else(|| title.clone())
+        })
+        .flatten();
+    let terminal_title_stripped = row_uses(row, AgentSidebarToken::TerminalTitleStripped)
+        .then(|| terminal.terminal_title_stripped())
+        .flatten();
+    let context = AgentTokenContext {
+        machine: None,
+        workspace: &workspace,
+        tab: tab.as_deref(),
+        pane: pane.as_deref(),
+        agent_label: agent.as_deref(),
+        terminal_title: terminal.terminal_title.as_deref(),
+        terminal_title_stripped: terminal_title_stripped.as_deref(),
+        canonical_agent: None,
+        tokens: &terminal.metadata_tokens,
+    };
+    let resolved = sidebar_agent_row(row, &context, "")
+        .into_iter()
+        .filter(|token| {
+            token
+                .kind
+                .text_value()
+                .is_some_and(|text| !text.trim().is_empty())
+        })
+        .collect::<Vec<_>>();
+    compose_title_spans(
+        &resolved,
+        pane_border_title_base_style(&app.palette, info.is_focused),
+        info.is_focused,
+        info.rect.width.saturating_sub(4) as usize,
+    )
+}
+
+fn compose_title_spans(
+    resolved: &[ResolvedToken],
+    base: Style,
+    focused: bool,
+    max_width: usize,
+) -> Option<Vec<ratatui::text::Span<'static>>> {
+    use ratatui::text::Span;
+    let mut content = Vec::new();
+    for (index, token) in resolved.iter().enumerate() {
+        let Some(text) = token.kind.text_value().map(str::trim) else {
+            continue;
+        };
+        if index > 0 {
+            content.push(Span::styled(
+                sidebar_token_separator(&resolved[index - 1], token),
+                base,
+            ));
+        }
+        // Focus adds BOLD on top of token styles; token fg replaces the fallback fg.
+        let mut style = apply_token_style(base.remove_modifier(Modifier::BOLD), token.style);
+        if focused {
+            style = style.add_modifier(Modifier::BOLD);
+        }
+        content.push(Span::styled(text.to_string(), style));
+    }
+    if content.is_empty() || max_width == 0 {
+        return None;
+    }
+    let mut spans = vec![Span::styled(" ", base)];
+    spans.extend(clip_title_spans(content, max_width));
+    spans.push(Span::styled(" ", base));
+    Some(spans)
+}
+
+fn grapheme_width(grapheme: &str) -> usize {
+    unicode_width::UnicodeWidthStr::width(grapheme)
+}
+
+// End-clips styled spans by display width with the existing "…" marker, cutting only at
+// grapheme-cluster boundaries.
+fn clip_title_spans(
+    spans: Vec<ratatui::text::Span<'static>>,
+    max_width: usize,
+) -> Vec<ratatui::text::Span<'static>> {
+    use unicode_segmentation::UnicodeSegmentation;
+    let total = spans
+        .iter()
+        .flat_map(|span| span.content.graphemes(true))
+        .map(grapheme_width)
+        .sum::<usize>();
+    if total <= max_width {
+        return spans;
+    }
+    let budget = max_width.saturating_sub(1);
+    let mut used = 0usize;
+    let mut clipped = Vec::new();
+    for span in spans {
+        let mut kept = String::new();
+        for grapheme in span.content.graphemes(true) {
+            let width = grapheme_width(grapheme);
+            if used + width > budget {
+                kept.push('…');
+                clipped.push(ratatui::text::Span::styled(kept, span.style));
+                return clipped;
+            }
+            kept.push_str(grapheme);
+            used += width;
+        }
+        clipped.push(ratatui::text::Span::styled(kept, span.style));
+    }
+    clipped
 }
 
 // Full view computation reaches this helper for active and background panes.
@@ -852,12 +1043,7 @@ fn render_pane_border_titles(
         if !info.borders.contains(Borders::TOP) || info.rect.width <= 4 {
             continue;
         }
-        let Some(title) = ws
-            .pane_state(info.id)
-            .and_then(|pane| app.terminals.get(&pane.attached_terminal_id))
-            .and_then(|terminal| terminal.border_label(app.show_agent_labels_on_pane_borders))
-            .and_then(|label| pane_border_title(&label, info.rect.width, info.is_focused))
-        else {
+        let Some(title) = pane_border_title_for(app, ws, info) else {
             continue;
         };
         let y = info.rect.y;
@@ -874,17 +1060,33 @@ fn render_pane_border_titles(
         if start_x >= end_x {
             continue;
         }
-        let mut style = Style::default().fg(pane_border_color(&app.palette, info.is_focused));
-        if info.is_focused {
-            style = style.add_modifier(Modifier::BOLD);
+        let style = pane_border_title_base_style(&app.palette, info.is_focused);
+        match title {
+            PaneBorderTitle::Plain(title) => {
+                buf.set_stringn(
+                    start_x,
+                    y,
+                    title,
+                    end_x.saturating_sub(start_x) as usize,
+                    style,
+                );
+            }
+            PaneBorderTitle::Composed(spans) => {
+                let mut x = start_x;
+                for span in spans {
+                    if x >= end_x {
+                        break;
+                    }
+                    (x, _) = buf.set_stringn(
+                        x,
+                        y,
+                        &span.content,
+                        end_x.saturating_sub(x) as usize,
+                        span.style,
+                    );
+                }
+            }
         }
-        buf.set_stringn(
-            start_x,
-            y,
-            title,
-            end_x.saturating_sub(start_x) as usize,
-            style,
-        );
     }
 }
 
@@ -3527,5 +3729,353 @@ mod tests {
                 (base.inner_rect.height - 4, base.inner_rect.width - 4)
             );
         }
+    }
+
+    fn title_row(row: &str) -> Vec<AgentSidebarToken> {
+        #[derive(serde::Deserialize)]
+        struct Row {
+            row: Vec<AgentSidebarToken>,
+        }
+        toml::from_str::<Row>(&format!("row = {row}")).unwrap().row
+    }
+
+    fn title_test_app(split: bool) -> (AppState, Vec<PaneId>) {
+        let mut app = AppState::test_new();
+        let mut workspace = Workspace::test_new("repo");
+        let root = workspace.tabs[0].root_pane;
+        let mut panes = vec![root];
+        if split {
+            panes.push(workspace.test_split(ratatui::layout::Direction::Horizontal));
+            workspace.tabs[0].layout.focus_pane(root);
+        }
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+        app.ensure_test_terminals();
+        (app, panes)
+    }
+
+    fn title_terminal(app: &mut AppState, pane: PaneId) -> &mut TerminalState {
+        let terminal_id = app.workspaces[0].terminal_id(pane).unwrap().clone();
+        app.terminals.get_mut(&terminal_id).unwrap()
+    }
+
+    fn report_title(terminal: &mut TerminalState, title: &str) {
+        terminal.set_detected_state(
+            Some(crate::detect::Agent::Claude),
+            crate::detect::AgentState::Idle,
+        );
+        terminal.set_agent_metadata(crate::terminal::AgentMetadataReport {
+            source: "user:presentation".into(),
+            agent_label: Some("claude".into()),
+            applies_to_source: None,
+            title: Some(title.into()),
+            display_agent: None,
+            state_labels: std::collections::HashMap::new(),
+            clear_title: false,
+            clear_display_agent: false,
+            clear_state_labels: false,
+            ttl: None,
+            seq: None,
+        });
+    }
+
+    fn set_tokens(terminal: &mut TerminalState, tokens: &[(&str, &str)]) {
+        terminal.metadata_tokens.patch(
+            tokens
+                .iter()
+                .map(|(key, value)| ((*key).to_string(), Some((*value).to_string())))
+                .collect(),
+            None,
+            std::time::Instant::now(),
+        );
+    }
+
+    fn render_title_tab(app: &AppState, area: Rect) -> Buffer {
+        let runtimes = TerminalRuntimeRegistry::new();
+        let layout = crate::ui::compute_tab_surface_for(
+            app,
+            &runtimes,
+            Some(crate::ui::TabSurfaceTarget {
+                workspace_index: 0,
+                tab_index: 0,
+            }),
+            area,
+            false,
+            Default::default(),
+        );
+        crate::server::render_stream::render_tab_surface_virtual(app, &runtimes, layout, area).0
+    }
+
+    fn title_pane_rect(app: &AppState, area: Rect, pane: PaneId) -> Rect {
+        let runtimes = TerminalRuntimeRegistry::new();
+        crate::ui::compute_tab_surface_for(
+            app,
+            &runtimes,
+            Some(crate::ui::TabSurfaceTarget {
+                workspace_index: 0,
+                tab_index: 0,
+            }),
+            area,
+            false,
+            Default::default(),
+        )
+        .pane_infos
+        .into_iter()
+        .find(|info| info.id == pane)
+        .unwrap()
+        .rect
+    }
+
+    fn assert_cells_style(buffer: &Buffer, y: u16, x: std::ops::Range<u16>, style: Style) {
+        for x in x {
+            let cell = &buffer[(x, y)];
+            assert_eq!(cell.fg, style.fg.unwrap(), "fg at ({x}, {y})");
+            assert_eq!(cell.modifier, style.add_modifier, "modifier at ({x}, {y})");
+        }
+    }
+
+    #[test]
+    fn pane_title_tokens_absent_renders_baseline_buffer() {
+        let (mut app, panes) = title_test_app(true);
+        report_title(title_terminal(&mut app, panes[0]), "Prompt title");
+        title_terminal(&mut app, panes[0]).set_manual_label("manual".into());
+        set_tokens(title_terminal(&mut app, panes[0]), &[("task", "deploy")]);
+        let area = Rect::new(0, 0, 60, 6);
+        let baseline = render_title_tab(&app, area);
+
+        // Characterize the protected plain path: effective title first, accent + BOLD on focus.
+        assert_eq!(row_text(&baseline, 0, 1..15), " Prompt title ");
+        assert_cells_style(
+            &baseline,
+            0,
+            1..15,
+            Style::default()
+                .fg(app.palette.accent)
+                .add_modifier(Modifier::BOLD),
+        );
+
+        // A row whose tokens are all missing falls back to the identical plain buffer.
+        app.pane_title_tokens = Some(title_row(r#"["$missing", "state_icon", "machine"]"#));
+        assert_eq!(render_title_tab(&app, area), baseline);
+    }
+
+    #[test]
+    fn pane_title_default_precedence_keeps_reported_title_over_manual_label() {
+        let (mut app, panes) = title_test_app(true);
+        report_title(title_terminal(&mut app, panes[0]), "Prompt title");
+        title_terminal(&mut app, panes[0]).set_manual_label("manual".into());
+        let area = Rect::new(0, 0, 60, 6);
+
+        assert_eq!(
+            row_text(&render_title_tab(&app, area), 0, 1..15),
+            " Prompt title "
+        );
+    }
+
+    #[test]
+    fn pane_manual_label_first_prefers_manual_label_over_tokens_and_title() {
+        let (mut app, panes) = title_test_app(true);
+        report_title(title_terminal(&mut app, panes[0]), "Prompt title");
+        title_terminal(&mut app, panes[0]).set_manual_label("manual".into());
+        set_tokens(title_terminal(&mut app, panes[0]), &[("task", "deploy")]);
+        app.pane_title_tokens = Some(title_row(r#"["$task"]"#));
+        let area = Rect::new(0, 0, 60, 6);
+
+        assert_eq!(row_text(&render_title_tab(&app, area), 0, 1..9), " deploy ");
+
+        app.pane_manual_label_first = true;
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(row_text(&buffer, 0, 1..9), " manual ");
+
+        app.pane_title_tokens = None;
+        assert_eq!(render_title_tab(&app, area), buffer);
+
+        // A blank manual label does not win.
+        title_terminal(&mut app, panes[0]).set_manual_label("   ".into());
+        app.pane_title_tokens = Some(title_row(r#"["$task"]"#));
+        assert_eq!(row_text(&render_title_tab(&app, area), 0, 1..9), " deploy ");
+    }
+
+    #[test]
+    fn pane_title_tokens_missing_fall_back_to_gated_identity() {
+        let (mut app, panes) = title_test_app(true);
+        title_terminal(&mut app, panes[0]).set_detected_state(
+            Some(crate::detect::Agent::Claude),
+            crate::detect::AgentState::Idle,
+        );
+        let area = Rect::new(0, 0, 60, 6);
+
+        for gate in [false, true] {
+            app.show_agent_labels_on_pane_borders = gate;
+            app.pane_title_tokens = None;
+            let baseline = render_title_tab(&app, area);
+            assert_eq!(row_text(&baseline, 0, 1..9) == " claude ", gate);
+
+            app.pane_title_tokens = Some(title_row(r#"["$missing"]"#));
+            assert_eq!(render_title_tab(&app, area), baseline);
+
+            // An explicit agent token is not gated.
+            app.pane_title_tokens = Some(title_row(r#"["agent"]"#));
+            assert_eq!(row_text(&render_title_tab(&app, area), 0, 1..9), " claude ");
+        }
+    }
+
+    #[test]
+    fn pane_title_tokens_compose_builtin_and_custom_with_token_styles() {
+        let (mut app, panes) = title_test_app(true);
+        for pane in &panes {
+            let terminal = title_terminal(&mut app, *pane);
+            set_tokens(terminal, &[("task", "fix")]);
+            terminal.set_manual_label("api".into());
+        }
+        app.pane_title_tokens = Some(title_row(
+            r##"["workspace", "$absent", { token = "$task", fg = "#f38ba8", dim = true }, { token = "pane", bold = false }]"##,
+        ));
+        let area = Rect::new(0, 0, 60, 6);
+        let buffer = render_title_tab(&app, area);
+        let right = title_pane_rect(&app, area, panes[1]);
+
+        let expected = " repo · fix · api ";
+        let width = expected.chars().count() as u16;
+        assert_eq!(row_text(&buffer, 0, 1..1 + width), expected);
+        let rx = right.x + 1;
+        assert_eq!(row_text(&buffer, 0, rx..rx + width), expected);
+
+        let token_fg = Color::Rgb(0xf3, 0x8b, 0xa8);
+        for (x0, focused, fallback) in [
+            (1, true, app.palette.accent),
+            (rx, false, app.palette.overlay0),
+        ] {
+            let bold = if focused {
+                Modifier::BOLD
+            } else {
+                Modifier::empty()
+            };
+            // padding + workspace + separator use the fallback colour.
+            assert_cells_style(
+                &buffer,
+                0,
+                x0..x0 + 8,
+                Style::default().fg(fallback).add_modifier(bold),
+            );
+            // token fg wins and keeps dim; focus adds BOLD on top.
+            assert_cells_style(
+                &buffer,
+                0,
+                x0 + 8..x0 + 11,
+                Style::default()
+                    .fg(token_fg)
+                    .add_modifier(Modifier::DIM | bold),
+            );
+            assert_cells_style(
+                &buffer,
+                0,
+                x0 + 11..x0 + 14,
+                Style::default().fg(fallback).add_modifier(bold),
+            );
+            // bold = false holds only while unfocused.
+            assert_cells_style(
+                &buffer,
+                0,
+                x0 + 14..x0 + 18,
+                Style::default().fg(fallback).add_modifier(bold),
+            );
+        }
+    }
+
+    #[test]
+    fn pane_title_tokens_clip_by_display_width_without_splitting_graphemes() {
+        let (mut app, panes) = title_test_app(true);
+        set_tokens(
+            title_terminal(&mut app, panes[0]),
+            &[("a", "abcdef"), ("b", "XYZ")],
+        );
+        set_tokens(title_terminal(&mut app, panes[1]), &[("a", "模块组织x")]);
+        app.pane_title_tokens = Some(title_row(r#"["$a", "$b"]"#));
+        // Two 12-column panes: an 8-column title budget each.
+        let area = Rect::new(0, 0, 23, 4);
+        let buffer = render_title_tab(&app, area);
+
+        assert_eq!(row_text(&buffer, 0, 1..11), " abcdef … ");
+        let right = title_pane_rect(&app, area, panes[1]);
+        let x = right.x + 1;
+        assert_eq!(buffer[(x + 1, 0)].symbol(), "模");
+        assert_eq!(buffer[(x + 3, 0)].symbol(), "块");
+        assert_eq!(buffer[(x + 5, 0)].symbol(), "组");
+        assert_eq!(buffer[(x + 7, 0)].symbol(), "…");
+        assert_eq!(buffer[(x + 8, 0)].symbol(), " ");
+    }
+
+    #[test]
+    fn compose_title_spans_clip_grapheme_clusters() {
+        use ratatui::text::Span;
+        let family = "👨\u{200d}👩\u{200d}👧";
+        let clipped = clip_title_spans(vec![Span::raw(format!("ab{family}cd"))], 4);
+        assert_eq!(
+            clipped
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>(),
+            "ab…"
+        );
+
+        let clipped = clip_title_spans(vec![Span::raw("a🇺🇸b")], 3);
+        assert_eq!(
+            clipped
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>(),
+            "a…"
+        );
+
+        let clipped = clip_title_spans(vec![Span::raw("e\u{301}xyz")], 3);
+        assert_eq!(
+            clipped
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>(),
+            "e\u{301}x…"
+        );
+
+        let fits = vec![Span::raw("ab"), Span::raw("cd")];
+        assert_eq!(clip_title_spans(fits.clone(), 4), fits);
+        let clipped = clip_title_spans(vec![Span::raw("abcdef")], 1);
+        assert_eq!(
+            clipped
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect::<String>(),
+            "…"
+        );
+    }
+
+    #[test]
+    fn pane_title_tokens_render_on_single_pane_with_always_borders() {
+        let (mut app, panes) = title_test_app(false);
+        set_tokens(title_terminal(&mut app, panes[0]), &[("task", "solo")]);
+        app.pane_title_tokens = Some(title_row(r#"["$task"]"#));
+        let area = Rect::new(0, 0, 30, 5);
+
+        // auto visibility is unchanged: no frame and no title for a lone pane.
+        let auto = render_title_tab(&app, area);
+        assert!(!row_text(&auto, 0, 0..30).contains("solo"));
+
+        app.pane_borders = PaneBordersConfig::Always;
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(buffer[(0, 0)].symbol(), "┌");
+        assert_eq!(row_text(&buffer, 0, 1..7), " solo ");
+    }
+
+    #[test]
+    fn pane_title_tokens_render_on_zoomed_pane() {
+        let (mut app, panes) = title_test_app(true);
+        set_tokens(title_terminal(&mut app, panes[0]), &[("task", "zoomed")]);
+        app.pane_title_tokens = Some(title_row(r#"["$task"]"#));
+        app.workspaces[0].zoomed = true;
+        let area = Rect::new(0, 0, 40, 6);
+
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(buffer[(0, 0)].symbol(), "┌");
+        assert_eq!(row_text(&buffer, 0, 1..9), " zoomed ");
     }
 }
