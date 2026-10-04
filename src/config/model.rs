@@ -1070,6 +1070,8 @@ pub struct UiConfig {
     pub pane_title_tokens: Option<Vec<super::AgentSidebarToken>>,
     /// Let a nonempty manual pane label win before reported titles and tokens. Default: false.
     pub pane_manual_label_first: bool,
+    /// Color an unfocused pane's frame lines from one agent sidebar token's explicit fg.
+    pub pane_border_identity_token: Option<super::AgentSidebarToken>,
     /// Hide the tab row when the workspace has one tab. Default: false.
     pub hide_tab_bar_when_single_tab: bool,
     /// Desktop tab row placement. Default: top.
@@ -1314,6 +1316,7 @@ impl Default for UiConfig {
             show_agent_labels_on_pane_borders: false,
             pane_title_tokens: None,
             pane_manual_label_first: false,
+            pane_border_identity_token: None,
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
             tab_bar_right: Vec::new(),
@@ -2074,6 +2077,48 @@ pane_title_tokens = ["tab", { token = "$task", fg = "#f38ba8", bold = true, dim 
         );
         let error = toml::from_str::<Config>(&too_many).unwrap_err().to_string();
         assert!(error.contains("at most 16 tokens"), "{error}");
+    }
+
+    #[test]
+    fn pane_border_identity_token_parses_single_token() {
+        use crate::config::AgentSidebarToken;
+        assert_eq!(Config::default().ui.pane_border_identity_token, None);
+
+        let plain: Config = toml::from_str("[ui]\npane_border_identity_token = \"$role\"").unwrap();
+        assert_eq!(
+            plain.ui.pane_border_identity_token,
+            Some(AgentSidebarToken::Custom("role".into()))
+        );
+
+        let styled: Config = toml::from_str(
+            r##"
+[ui]
+pane_border_identity_token = { token = "$role", fg = "#89b4fa", rules = [{ equals = "build", fg = "#a6e3a1" }] }
+"##,
+        )
+        .unwrap();
+        let Some(AgentSidebarToken::Styled {
+            token,
+            style,
+            rules,
+        }) = styled.ui.pane_border_identity_token
+        else {
+            panic!("expected styled token");
+        };
+        assert_eq!(*token, AgentSidebarToken::Custom("role".into()));
+        assert_eq!(
+            style.fg.map(|fg| fg.ratatui()),
+            Some(ratatui::style::Color::Rgb(0x89, 0xb4, 0xfa))
+        );
+        assert_eq!(rules.len(), 1);
+
+        for toml in [
+            "[ui]\npane_border_identity_token = \"unknown\"",
+            "[ui]\npane_border_identity_token = { token = \"$role\", fg = \"reset\" }",
+            "[ui]\npane_border_identity_token = { token = \"$role\", fg = \"#12\" }",
+        ] {
+            assert!(toml::from_str::<Config>(toml).is_err(), "{toml}");
+        }
     }
 
     #[test]
