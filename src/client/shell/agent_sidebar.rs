@@ -57,9 +57,11 @@ pub(super) fn render_agent_panel(
     agent_scroll: &mut usize,
     hits: &mut ShellHitMap,
 ) {
+    let (divider, content) = agent_section_rects(area, config.sidebar_padding_cells);
     if !render_agent_panel_header(
         buffer,
-        area,
+        divider,
+        content,
         snapshot.agent_view_label.as_deref(),
         config,
         hits,
@@ -70,7 +72,7 @@ pub(super) fn render_agent_panel(
     let rows = agent_rows(snapshot, config, None);
     render_agent_list(
         buffer,
-        area,
+        content,
         &rows,
         snapshot
             .agent_view_label
@@ -87,13 +89,35 @@ pub(super) fn render_agent_panel(
     );
 }
 
+/// Splits the agents section into its full-width divider row and its padded content below it.
+pub(super) fn agent_section_rects(area: Rect, padding: u16) -> (Rect, Rect) {
+    if area.height == 0 {
+        return (Rect::default(), Rect::default());
+    }
+    let divider = Rect::new(area.x, area.y, area.width, 1);
+    let content = Rect::new(area.x, area.y + 1, area.width, area.height - 1);
+    (divider, crate::ui::inset_sidebar_section(content, padding))
+}
+
 pub(super) fn render_agent_panel_header(
     buffer: &mut Buffer,
+    divider: Rect,
     area: Rect,
     agent_view_label: Option<&str>,
     config: &ClientShellConfig,
     hits: &mut ShellHitMap,
 ) -> bool {
+    if divider.height == 0 {
+        return false;
+    }
+    put_text(
+        buffer,
+        divider.x,
+        divider.y,
+        divider.width,
+        &"─".repeat(divider.width as usize),
+        Style::default().fg(config.palette.surface_dim),
+    );
     if area.height == 0 {
         return false;
     }
@@ -101,17 +125,6 @@ pub(super) fn render_agent_panel_header(
         buffer,
         area.x,
         area.y,
-        area.width,
-        &"─".repeat(area.width as usize),
-        Style::default().fg(config.palette.surface_dim),
-    );
-    if area.height < 2 {
-        return false;
-    }
-    put_text(
-        buffer,
-        area.x,
-        area.y + 1,
         area.width,
         " agents",
         Style::default()
@@ -125,7 +138,7 @@ pub(super) fn render_agent_panel_header(
     let sort_width = display_width(sort_label).min(area.width as usize) as u16;
     let sort_rect = Rect::new(
         area.right().saturating_sub(sort_width),
-        area.y + 1,
+        area.y,
         sort_width,
         1,
     );
@@ -164,9 +177,9 @@ pub(super) fn render_agent_list<T>(
 ) {
     let body = Rect::new(
         area.x,
-        area.y.saturating_add(3),
+        area.y.saturating_add(2),
         area.width,
-        area.height.saturating_sub(3),
+        area.height.saturating_sub(2),
     );
     hits.agent_body = body;
     if body.is_empty() || rows.is_empty() {
