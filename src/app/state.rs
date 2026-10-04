@@ -38,6 +38,10 @@ pub struct Palette {
     /// Focused tab overrides. None follows panel contrast/accent; Some(Reset) is explicit.
     pub active_tab_fg: Option<Color>,
     pub active_tab_bg: Option<Color>,
+    /// Pane frame and title focus overrides. None follows accent (focused) or overlay0
+    /// (unfocused) at render time; Some(Reset) is explicit.
+    pub pane_border_active: Option<Color>,
+    pub pane_border_inactive: Option<Color>,
     /// Background for the tab bar, floating panels, overlays, and modals.
     pub panel_bg: Color,
     /// Optional desktop sidebar background. Reset preserves the terminal background.
@@ -82,6 +86,8 @@ impl Palette {
         Self {
             active_tab_fg: None,
             active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
             accent: Color::Rgb(137, 180, 250), // blue
             panel_bg: Color::Rgb(24, 24, 37),
             sidebar_bg: Color::Reset,
@@ -109,6 +115,8 @@ impl Palette {
         Self {
             active_tab_fg: None,
             active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
             accent: Color::Rgb(30, 102, 245),
             panel_bg: Color::Rgb(239, 241, 245),
             sidebar_bg: Color::Reset,
@@ -136,6 +144,8 @@ impl Palette {
         Self {
             active_tab_fg: None,
             active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
             accent: Color::Blue,
             panel_bg: Color::Reset,
             sidebar_bg: Color::Reset,
@@ -163,6 +173,8 @@ impl Palette {
         Self {
             active_tab_fg: None,
             active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
             accent: Color::Rgb(122, 162, 247), // blue
             panel_bg: Color::Rgb(26, 27, 38),
             sidebar_bg: Color::Reset,
@@ -190,6 +202,8 @@ impl Palette {
         Self {
             active_tab_fg: None,
             active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
             accent: Color::Rgb(46, 125, 233),
             panel_bg: Color::Rgb(225, 226, 231),
             sidebar_bg: Color::Reset,
@@ -217,6 +231,8 @@ impl Palette {
         Self {
             active_tab_fg: None,
             active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
             accent: Color::Rgb(189, 147, 249), // purple
             panel_bg: Color::Rgb(40, 42, 54),
             sidebar_bg: Color::Reset,
@@ -244,6 +260,8 @@ impl Palette {
         Self {
             active_tab_fg: None,
             active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
             accent: Color::Rgb(136, 192, 208), // frost
             panel_bg: Color::Rgb(46, 52, 64),
             sidebar_bg: Color::Reset,
@@ -271,6 +289,8 @@ impl Palette {
         Self {
             active_tab_fg: None,
             active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
             accent: Color::Rgb(215, 153, 33), // yellow
             panel_bg: Color::Rgb(40, 40, 40),
             sidebar_bg: Color::Reset,
@@ -298,6 +318,8 @@ impl Palette {
         Self {
             active_tab_fg: None,
             active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
             accent: Color::Rgb(7, 102, 120),
             panel_bg: Color::Rgb(251, 241, 199),
             sidebar_bg: Color::Reset,
@@ -325,6 +347,8 @@ impl Palette {
         Self {
             active_tab_fg: None,
             active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
             accent: Color::Rgb(97, 175, 239), // blue
             panel_bg: Color::Rgb(40, 44, 52),
             sidebar_bg: Color::Reset,
@@ -352,6 +376,8 @@ impl Palette {
         Self {
             active_tab_fg: None,
             active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
             accent: Color::Rgb(64, 120, 242),
             panel_bg: Color::Rgb(250, 250, 250),
             sidebar_bg: Color::Reset,
@@ -379,6 +405,8 @@ impl Palette {
         Self {
             active_tab_fg: None,
             active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
             accent: Color::Rgb(38, 139, 210), // blue
             panel_bg: Color::Rgb(0, 43, 54),
             sidebar_bg: Color::Reset,
@@ -406,6 +434,8 @@ impl Palette {
         Self {
             active_tab_fg: None,
             active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
             accent: Color::Rgb(38, 139, 210),
             panel_bg: Color::Rgb(253, 246, 227),
             sidebar_bg: Color::Reset,
@@ -433,6 +463,8 @@ impl Palette {
         Self {
             active_tab_fg: None,
             active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
             accent: Color::Rgb(126, 156, 216), // blue
             panel_bg: Color::Rgb(31, 31, 40),
             sidebar_bg: Color::Reset,
@@ -460,6 +492,8 @@ impl Palette {
         Self {
             active_tab_fg: None,
             active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
             accent: Color::Rgb(77, 105, 155),
             panel_bg: Color::Rgb(242, 236, 188),
             sidebar_bg: Color::Reset,
@@ -487,6 +521,8 @@ impl Palette {
         Self {
             active_tab_fg: None,
             active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
             accent: Color::Rgb(196, 167, 231), // iris
             panel_bg: Color::Rgb(25, 23, 36),
             sidebar_bg: Color::Reset,
@@ -514,6 +550,8 @@ impl Palette {
         Self {
             active_tab_fg: None,
             active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
             accent: Color::Rgb(144, 122, 169),
             panel_bg: Color::Rgb(250, 244, 237),
             sidebar_bg: Color::Reset,
@@ -541,6 +579,8 @@ impl Palette {
         Self {
             active_tab_fg: None,
             active_tab_bg: None,
+            pane_border_active: None,
+            pane_border_inactive: None,
             accent: Color::Rgb(255, 199, 153),
             panel_bg: Color::Rgb(26, 26, 26),
             sidebar_bg: Color::Reset,
@@ -596,6 +636,12 @@ impl Palette {
         }
         if let Some(c) = &custom.active_tab_bg {
             self.active_tab_bg = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.pane_border_active {
+            self.pane_border_active = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.pane_border_inactive {
+            self.pane_border_inactive = Some(parse_color(c));
         }
         if let Some(c) = &custom.accent {
             self.accent = parse_color(c);
@@ -664,6 +710,12 @@ impl Palette {
         }
         if let Some(c) = &custom.active_tab_bg {
             self.active_tab_bg = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.pane_border_active {
+            self.pane_border_active = Some(parse_color(c));
+        }
+        if let Some(c) = &custom.pane_border_inactive {
+            self.pane_border_inactive = Some(parse_color(c));
         }
         if let Some(c) = &custom.accent {
             self.accent = parse_color(c);
@@ -1475,6 +1527,60 @@ mod tests {
             assert_eq!(resolved.active_tab_fg, Some(Color::Red));
             assert_eq!(resolved.active_tab_bg, Some(Color::Reset));
         }
+    }
+
+    #[test]
+    fn built_in_themes_leave_pane_border_colors_unset() {
+        assert_eq!(crate::config::THEME_NAMES.len(), 18);
+        for name in crate::config::THEME_NAMES {
+            let palette = Palette::from_name(name).unwrap();
+            assert_eq!(palette.pane_border_active, None, "theme: {name}");
+            assert_eq!(palette.pane_border_inactive, None, "theme: {name}");
+        }
+    }
+
+    #[test]
+    fn pane_border_mode_overrides_inherit_common_and_preserve_reset() {
+        let base = Palette::catppuccin();
+        let common = crate::config::CustomThemeColors {
+            pane_border_active: Some("red".into()),
+            pane_border_inactive: Some("blue".into()),
+            ..Default::default()
+        };
+        let palette = base.clone().with_overrides(&common);
+        assert_eq!(palette.pane_border_active, Some(Color::Red));
+        assert_eq!(palette.pane_border_inactive, Some(Color::Blue));
+        // Pane border keys never rewrite the shared accent / overlay0 tokens.
+        assert_eq!(palette.accent, base.accent);
+        assert_eq!(palette.overlay0, base.overlay0);
+        assert_eq!(
+            palette.clone().with_mode_overrides(&Default::default()),
+            palette
+        );
+        for alias in ["reset", "default", "none", "transparent"] {
+            let mode = crate::config::ModeThemeColors {
+                pane_border_active: Some(alias.into()),
+                ..Default::default()
+            };
+            let resolved = palette.clone().with_mode_overrides(&mode);
+            assert_eq!(resolved.pane_border_active, Some(Color::Reset));
+            assert_eq!(resolved.pane_border_inactive, Some(Color::Blue));
+            let mode = crate::config::ModeThemeColors {
+                pane_border_inactive: Some(alias.into()),
+                ..Default::default()
+            };
+            let resolved = palette.clone().with_mode_overrides(&mode);
+            assert_eq!(resolved.pane_border_active, Some(Color::Red));
+            assert_eq!(resolved.pane_border_inactive, Some(Color::Reset));
+        }
+        let invalid = crate::config::ModeThemeColors {
+            pane_border_active: Some("not-a-color".into()),
+            pane_border_inactive: Some("#zzzzzz".into()),
+            ..Default::default()
+        };
+        let resolved = palette.with_mode_overrides(&invalid);
+        assert_eq!(resolved.pane_border_active, Some(Color::Cyan));
+        assert_eq!(resolved.pane_border_inactive, Some(Color::Cyan));
     }
 
     #[test]

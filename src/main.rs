@@ -88,6 +88,10 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # Reset aliases use terminal defaults rather than inheriting a color.
 # active_tab_fg = "#181825"
 # active_tab_bg = "#89b4fa"
+# Pane frame and title only; omitted active follows accent, omitted inactive follows
+# overlay0. Equal values remove the color-only focus cue (the focused title stays bold).
+# pane_border_active = "#89b4fa"
+# pane_border_inactive = "#6c7086"
 # sidebar_bg = "#181825"
 # active_row_bg = "#1e1e2e"
 # selection_bg = "#313244"
@@ -100,12 +104,14 @@ const DEFAULT_CONFIG: &str = r##"# herdr configuration
 # [theme.custom.light]
 # active_tab_fg = "#eff1f5"
 # active_tab_bg = "#1e66f5"
+# pane_border_active = "#1e66f5"
 # panel_bg = "#eff1f5"
 # text = "#4c4f69"
 #
 # [theme.custom.dark]
 # active_tab_fg = "#181825"
 # active_tab_bg = "#89b4fa"
+# pane_border_active = "#89b4fa"
 # panel_bg = "#1e1e2e"
 # text = "#cdd6f4"
 

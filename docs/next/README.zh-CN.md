@@ -59,6 +59,8 @@ herdr
 
 可在 `[theme.custom]` 中使用可选的 `active_tab_fg` 和 `active_tab_bg` 自定义已聚焦标签页标签的颜色（启用 `auto_switch` 时也可在 `light`/`dark` 子表中设置）。省略颜色会保留现有的动态默认值；重置别名明确使用终端默认色。详情见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
 
+可在 `[theme.custom]` 中使用可选的 `pane_border_active` 和 `pane_border_inactive` 自定义窗格边框与标题的聚焦颜色（启用 `auto_switch` 时也可在 `light`/`dark` 子表中设置）。省略时继续跟随 `accent` 和 `overlay0`；重置别名明确使用终端默认色。详情见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
+
 ## 致谢
 
 <a href="https://terminaltrove.com/"><img src="assets/sponsors/terminal-trove.png" alt="Terminal Trove" width="200" /></a>
