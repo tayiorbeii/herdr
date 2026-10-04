@@ -398,6 +398,18 @@ impl<'de> Deserialize<'de> for SpaceSidebarToken {
     }
 }
 
+/// Deserialize one agent token row (the shape of a single `rows` entry) as an opt-in value.
+pub(crate) fn deserialize_optional_agent_sidebar_row<'de, D>(
+    deserializer: D,
+) -> Result<Option<Vec<AgentSidebarToken>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let row = Vec::<AgentSidebarToken>::deserialize(deserializer)?;
+    validate_sidebar_rows(std::slice::from_ref(&row)).map_err(serde::de::Error::custom)?;
+    Ok(Some(row))
+}
+
 type AgentSidebarRows = Vec<Vec<AgentSidebarToken>>;
 type SpaceSidebarRows = Vec<Vec<SpaceSidebarToken>>;
 

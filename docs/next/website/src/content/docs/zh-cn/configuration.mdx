@@ -364,6 +364,7 @@ pane_border_style_active = "heavy"
 | 任意线型 × `pane_gap_cells` | 可叠加；`pane_gap_cells = 0` 与 `pane_gaps = false` 一样共享分隔线，N ≥ 1 时每个窗格都有自己线型的边框 |
 | 任意线型 × `pane_padding_cells` | 可叠加；内边距位于边框内侧，不改变边框字符，`rounded` 圆角仍在边框转角处 |
 | 窗格线型 × `sidebar_padding_cells` | 互不影响；侧边栏内边距只移动侧边栏内容，不影响窗格边框 |
+| 任意线型 × `pane_title_tokens` | 可叠加；组合标题以其令牌颜色和焦点粗体替换上边的单元格，标题之后的边保持窗格线型（包括虚线） |
 | 圆角 × 粗线或双线 | Unicode 没有粗线或双线圆角，因此粗线和双线转角保持方角 |
 | 虚线 × 转角和连接处 | 只有直线段为虚线；转角、T 形和十字连接处为相同粗细的实线 |
 | 共享分隔线上不同线型相遇（`pane_gaps = false` 或 `pane_gap_cells = 0`） | 与焦点颜色一样，聚焦窗格边框上以其线型为准。连接处在 Unicode 有对应混合字符时使用该字符（所有细线与粗线的组合，以及纵横分开的细线与双线组合）；否则含双线的连接处整体使用双线。与实线共享的虚线段采用胜出一方的线型 |
@@ -376,6 +377,8 @@ pane_border_style_active = "heavy"
 在 `[ui]` 下设置 `pane_gap_cells = N`，可按终端单元格数（0 到 65535）指定分割窗格之间的空白。设置后将覆盖 `pane_gaps`：`0` 表示共享分隔边框，`N` 表示在相邻窗格的边框之间留出 N 个空白单元格（边框线另计）；当 `pane_borders = "off"` 时，这 N 个单元格用于分隔窗格内容。空白取自每个分割处左侧或上方的窗格；外边缘、侧边栏和窗格内部保持不变。窗口较小时，间距只会缩小到让每个窗格保留一行一列可用空间所需的程度，窗口变大后会恢复。不设置时保持 `pane_gaps` 的行为；无效值会被报告并忽略。
 
 在 `[ui]` 下设置 `pane_padding_cells = 2`，可在每个窗格的边框与终端内容之间的四边各保留 2 个空白单元格。关闭边框时同样有效，此时内容会从窗格边缘向内缩进。终端尺寸和鼠标位置以缩进后的区域为准，滚动条保留在自己的列中。窗格较小时会缩减内边距，使终端至少保留 4 列 2 行；已小于该尺寸的窗格在对应方向上不加内边距。默认值 `0` 保持原有布局，此设置不会改变窗格间距或侧边栏。无效值只会禁用此设置，并给出配置诊断信息。
+
+在 `[ui]` 下设置 `pane_title_tokens`，可使用与 `ui.sidebar.agents.rows` 相同的令牌行格式组成窗格边框标题，例如 `pane_title_tokens = ["tab", { token = "$task", fg = "#f38ba8" }]`。支持文本内置令牌（`workspace`、`tab`、`pane`、`agent`、`terminal_title`、`terminal_title_stripped`）和 `$name` 窗格元数据令牌；`state_icon`、`state_text` 和 `machine` 在标题中视为缺失。令牌会随 `herdr pane report-metadata` 的更新、清除和 TTL 过期实时刷新。缺失的令牌会被跳过；如果没有剩余文本，标题依次回退到上报的标题、手动标签，以及启用 `show_agent_labels_on_pane_borders` 时的代理标签。令牌颜色优先于边框标题颜色，聚焦窗格会额外加粗。标题按窗格宽度用 `…` 截断。设置 `pane_manual_label_first = true` 可让非空的手动窗格标签优先于上报的标题和令牌。要在单个窗格上显示标题，请使用 `pane_borders = "always"`。
 
 在 `[ui]` 下设置 `tab_bar_position = "bottom"`，可将桌面标签栏放到终端窗格下方。Prefix、Navigate、Copy 和 Resize 模式栏会在显示期间临时替换底部标签栏。默认值为 `"top"`。
 
