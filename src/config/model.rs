@@ -980,6 +980,8 @@ pub struct UiConfig {
     pub pane_scrollbars: bool,
     /// Keep split panes visually separated instead of sharing divider borders. Default: true.
     pub pane_gaps: bool,
+    /// Draw the focused pane's frame with heavy line glyphs beside its accent color. Default: false.
+    pub pane_focus_weight: bool,
     /// Show agent labels in split pane borders when no manual pane label is set. Default: false.
     pub show_agent_labels_on_pane_borders: bool,
     /// Hide the tab row when the workspace has one tab. Default: false.
@@ -1217,6 +1219,7 @@ impl Default for UiConfig {
             rounded_borders: false,
             pane_scrollbars: true,
             pane_gaps: true,
+            pane_focus_weight: false,
             show_agent_labels_on_pane_borders: false,
             hide_tab_bar_when_single_tab: false,
             tab_bar_position: TabBarPositionConfig::Top,
@@ -1522,6 +1525,7 @@ status_indicators = "symbols"
         assert!(default_config.ui.pane_outer_borders);
         assert!(default_config.ui.pane_scrollbars);
         assert!(default_config.ui.pane_gaps);
+        assert!(!default_config.ui.pane_focus_weight);
         assert!(!default_config.ui.show_agent_labels_on_pane_borders);
         assert!(!default_config.ui.hide_tab_bar_when_single_tab);
         assert_eq!(
@@ -1537,6 +1541,7 @@ pane_borders = "always"
 pane_outer_borders = false
 pane_scrollbars = false
 pane_gaps = true
+pane_focus_weight = true
 show_agent_labels_on_pane_borders = true
 hide_tab_bar_when_single_tab = true
 tab_bar_position = "bottom"
@@ -1554,6 +1559,7 @@ tab_bar_right_separator = " · "
         assert!(!config.ui.pane_outer_borders);
         assert!(!config.ui.pane_scrollbars);
         assert!(config.ui.pane_gaps);
+        assert!(config.ui.pane_focus_weight);
         assert!(config.ui.show_agent_labels_on_pane_borders);
         assert!(config.ui.hide_tab_bar_when_single_tab);
         assert_eq!(config.ui.tab_bar_position, TabBarPositionConfig::Bottom);
