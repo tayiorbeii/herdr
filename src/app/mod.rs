@@ -492,6 +492,7 @@ impl App {
             pane_scrollbars: config.ui.pane_scrollbars,
             pane_gaps: config.ui.pane_gaps,
             pane_focus_weight: config.ui.pane_focus_weight,
+            pane_heavy_borders: config.ui.pane_heavy_borders,
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: String::new(),
@@ -842,6 +843,7 @@ impl App {
                 self.state.pane_scrollbars = config.ui.pane_scrollbars;
                 self.state.pane_gaps = config.ui.pane_gaps;
                 self.state.pane_focus_weight = config.ui.pane_focus_weight;
+                self.state.pane_heavy_borders = config.ui.pane_heavy_borders;
                 self.state.show_agent_labels_on_pane_borders =
                     config.ui.show_agent_labels_on_pane_borders;
                 self.configure_tab_bar_status(
@@ -1949,6 +1951,38 @@ pane_border_inactive = "reset"
             let report = app.reload_config();
             assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
             assert_eq!(app.state.pane_focus_weight, expected, "{body:?}");
+        }
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_config_applies_and_removes_pane_heavy_borders() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-pane-heavy-borders");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let base = "[update]\nversion_check = false\nmanifest_check = false\n[ui]\n";
+
+        let mut app = test_app();
+        assert!(!app.state.pane_heavy_borders);
+        for (body, heavy, focus_weight) in [
+            ("pane_heavy_borders = true\n", true, false),
+            (
+                "pane_heavy_borders = true\npane_focus_weight = true\n",
+                true,
+                true,
+            ),
+            ("pane_heavy_borders = false\n", false, false),
+            ("pane_heavy_borders = true\n", true, false),
+            ("", false, false),
+        ] {
+            std::fs::write(&path, format!("{base}{body}")).unwrap();
+            let report = app.reload_config();
+            assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+            assert_eq!(app.state.pane_heavy_borders, heavy, "{body:?}");
+            assert_eq!(app.state.pane_focus_weight, focus_weight, "{body:?}");
         }
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);

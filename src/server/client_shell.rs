@@ -745,12 +745,17 @@ mod tests {
         );
     }
 
-    fn rounded_corner_changes(
+    const ROUNDED_COLS: u16 = 100;
+    const ROUNDED_ROWS: u16 = 30;
+
+    /// Composes the same workspace through the server and client with
+    /// `rounded_borders` off, then on.
+    fn rounded_frame_pair(
         build: impl Fn() -> crate::workspace::Workspace,
         configure: impl Fn(&mut crate::config::Config),
-    ) -> Vec<((u16, u16), String, String)> {
-        const COLS: u16 = 100;
-        const ROWS: u16 = 30;
+    ) -> (crate::protocol::FrameData, crate::protocol::FrameData) {
+        const COLS: u16 = ROUNDED_COLS;
+        const ROWS: u16 = ROUNDED_ROWS;
         let mut frames = Vec::new();
         for rounded in [false, true] {
             let mut config = crate::config::Config::default();
@@ -802,7 +807,18 @@ mod tests {
             });
             frames.push(client.compose(COLS, ROWS).expect("composed frame").frame);
         }
-        let (square, rounded) = (&frames[0], &frames[1]);
+        let rounded = frames.pop().expect("rounded frame");
+        let square = frames.pop().expect("square frame");
+        (square, rounded)
+    }
+
+    fn rounded_corner_changes(
+        build: impl Fn() -> crate::workspace::Workspace,
+        configure: impl Fn(&mut crate::config::Config),
+    ) -> Vec<((u16, u16), String, String)> {
+        const COLS: u16 = ROUNDED_COLS;
+        let (square, rounded) = rounded_frame_pair(build, configure);
+        let (square, rounded) = (&square, &rounded);
         let symbols: Vec<&str> = square
             .cells
             .iter()
@@ -902,12 +918,86 @@ mod tests {
         );
     }
 
+    /// GW1/A1 x B1: rounding is a client pass over light corners only, so the
+    /// heavy (GW1, or A1 focus) and double (GW1 + A1 focus) corners stay square.
+    #[tokio::test(flavor = "current_thread")]
+    async fn rounded_borders_keep_heavy_and_double_pane_corners_square() {
+        fn glyphs(frame: &FrameData, set: &str) -> String {
+            let mut found: Vec<&str> = frame
+                .cells
+                .iter()
+                .map(|cell| cell.symbol.as_str())
+                .filter(|symbol| !symbol.is_empty() && set.contains(symbol))
+                .collect();
+            found.sort_unstable();
+            found.concat()
+        }
+        const ARCS: &str = "╭╮╰╯";
+        const LIGHT: &str = "┌┐└┘";
+        const HEAVY: &str = "┏┓┗┛";
+        const DOUBLE: &str = "╔╗╚╝";
+        let build = || rounded_test_workspace(2, false);
+        let sorted = |corners: &str| {
+            let mut chars: Vec<char> = corners.chars().collect();
+            chars.sort_unstable();
+            chars.into_iter().collect::<String>()
+        };
+
+        for shared in [false, true] {
+            let configure = |heavy: bool, weight: bool| {
+                move |config: &mut crate::config::Config| {
+                    config.ui.pane_heavy_borders = heavy;
+                    config.ui.pane_focus_weight = weight;
+                    config.ui.pane_gaps = !shared;
+                }
+            };
+
+            // Heavy and focus weight: every corner is heavy or double; none round.
+            assert!(rounded_corner_changes(build, configure(true, true)).is_empty());
+            let (square, rounded) = rounded_frame_pair(build, configure(true, true));
+            assert_eq!(square, rounded, "shared={shared}");
+            assert_eq!(glyphs(&rounded, ARCS), "", "shared={shared}");
+            assert!(!glyphs(&rounded, DOUBLE).is_empty(), "shared={shared}");
+            if !shared {
+                assert_eq!(glyphs(&rounded, DOUBLE), sorted(DOUBLE));
+                assert_eq!(glyphs(&rounded, HEAVY), sorted(HEAVY));
+            }
+
+            // Heavy only: all frames heavy, nothing rounds.
+            assert!(rounded_corner_changes(build, configure(true, false)).is_empty());
+            let (_, rounded) = rounded_frame_pair(build, configure(true, false));
+            assert_eq!(glyphs(&rounded, ARCS), "", "shared={shared}");
+            assert_eq!(glyphs(&rounded, DOUBLE), "", "shared={shared}");
+
+            // Focus weight only: the focused frame's heavy corners stay square and
+            // only the unfocused light corners round.
+            let changes = rounded_corner_changes(build, configure(false, true));
+            assert!(changes
+                .iter()
+                .all(|(_, before, _)| LIGHT.contains(before.as_str())));
+            let (_, rounded) = rounded_frame_pair(build, configure(false, true));
+            assert!(!glyphs(&rounded, HEAVY).is_empty(), "shared={shared}");
+            if !shared {
+                assert_eq!(changes.len(), 4);
+                assert_eq!(glyphs(&rounded, HEAVY), sorted(HEAVY));
+                assert_eq!(glyphs(&rounded, ARCS), sorted(ARCS));
+            }
+        }
+    }
+
     fn focus_weight_app(pane_focus_weight: bool) -> (crate::app::App, [crate::layout::PaneId; 2]) {
         let mut config = crate::config::Config::default();
         config.ui.pane_focus_weight = pane_focus_weight;
+        split_shell_app(&config)
+    }
+
+    /// Two side-by-side panes, left focused, from a real `App::new(config)`.
+    fn split_shell_app(
+        config: &crate::config::Config,
+    ) -> (crate::app::App, [crate::layout::PaneId; 2]) {
         let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
         let mut app = crate::app::App::new(
-            &config,
+            config,
             crate::app::AppPolicy::TEST,
             None,
             api_rx,
@@ -1079,5 +1169,81 @@ mod tests {
         assert_glyph_only_surface_change(&plain, &surface);
         assert_eq!(surface_corner(&plain, 0), "┌");
         assert_eq!(surface_corner(&surface, 0), "┏");
+    }
+
+    fn heavy_borders_app(
+        pane_heavy_borders: bool,
+        pane_focus_weight: bool,
+    ) -> (crate::app::App, [crate::layout::PaneId; 2]) {
+        let mut config = crate::config::Config::default();
+        config.ui.pane_heavy_borders = pane_heavy_borders;
+        config.ui.pane_focus_weight = pane_focus_weight;
+        let (app, panes) = split_shell_app(&config);
+        // The option reaches the renderer through `App::new` like `pane_gaps`.
+        assert_eq!(app.state.pane_heavy_borders, pane_heavy_borders);
+        (app, panes)
+    }
+
+    #[test]
+    fn pane_heavy_borders_keep_geometry_and_follow_focus() {
+        let (mut plain_app, _) = heavy_borders_app(false, false);
+        let plain = focus_weight_surface(&mut plain_app);
+        for focus_weight in [false, true] {
+            let (mut app, [left, right]) = heavy_borders_app(true, focus_weight);
+            let surface = focus_weight_surface(&mut app);
+            assert_glyph_only_surface_change(&plain, &surface);
+            let public_left = app.public_pane_id(0, left).unwrap();
+            let left_at = surface
+                .panes
+                .iter()
+                .position(|pane| pane.pane_id == public_left)
+                .unwrap();
+            let right_at = 1 - left_at;
+            let focused_corner = if focus_weight { "╔" } else { "┏" };
+            assert_eq!(surface_corner(&plain, left_at), "┌");
+            assert_eq!(surface_corner(&surface, left_at), focused_corner);
+            assert_eq!(surface_corner(&surface, right_at), "┏");
+
+            app.handle_api_request(crate::api::schema::Request {
+                id: "keyboard".into(),
+                method: crate::api::schema::Method::PaneFocusDirection(
+                    crate::api::schema::PaneFocusDirectionParams {
+                        pane_id: app.public_pane_id(0, left),
+                        direction: crate::api::schema::PaneDirection::Right,
+                    },
+                ),
+            });
+            assert_eq!(app.state.workspaces[0].focused_pane_id(), Some(right));
+            let surface = focus_weight_surface(&mut app);
+            assert_eq!(surface_corner(&surface, left_at), "┏");
+            assert_eq!(surface_corner(&surface, right_at), focused_corner);
+            assert_eq!(
+                anonymous_panes(&surface),
+                anonymous_panes(&plain)
+                    .into_iter()
+                    .map(|mut pane| {
+                        pane.focused = !pane.focused;
+                        pane
+                    })
+                    .collect::<Vec<_>>()
+            );
+            assert_eq!(surface.splits, plain.splits);
+        }
+    }
+
+    #[test]
+    fn pane_heavy_borders_zoomed_pane() {
+        let (mut plain_app, _) = heavy_borders_app(false, false);
+        plain_app.state.workspaces[0].tabs[0].zoomed = true;
+        let plain = focus_weight_surface(&mut plain_app);
+        for (focus_weight, corner) in [(false, "┏"), (true, "╔")] {
+            let (mut app, _) = heavy_borders_app(true, focus_weight);
+            app.state.workspaces[0].tabs[0].zoomed = true;
+            let surface = focus_weight_surface(&mut app);
+            assert_eq!(surface.panes.len(), 1);
+            assert_glyph_only_surface_change(&plain, &surface);
+            assert_eq!(surface_corner(&plain, 0), "┌");
+            assert_eq!(surface_corner(&surface, 0), corner);
+        }
     }
 }

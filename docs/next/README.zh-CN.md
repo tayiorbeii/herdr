@@ -57,6 +57,8 @@ herdr
 
 在 `[ui]` 下设置 `pane_focus_weight = true`，即可启用不依赖颜色的焦点提示：获得焦点的窗格边框在强调色之外改用粗线字符。默认保持不变，窗格尺寸和分隔线均保持原样。参见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
 
+在 `[ui]` 下设置 `pane_heavy_borders = true`，即可用粗线绘制所有窗格边框；与 `pane_focus_weight = true` 同时使用时，获得焦点的窗格改用双线。参见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
+
 ## 文档
 
 所有文档都在 [herdr.dev/docs](https://herdr.dev/zh-cn/docs/)：[快速开始](https://herdr.dev/zh-cn/docs/quick-start/) · [核心概念](https://herdr.dev/zh-cn/docs/concepts/) · [受支持的智能体](https://herdr.dev/zh-cn/docs/agents/) · [键盘](https://herdr.dev/zh-cn/docs/keyboard/) · [配置](https://herdr.dev/zh-cn/docs/configuration/) · [会话状态](https://herdr.dev/zh-cn/docs/session-state/) · [连接机器](https://herdr.dev/zh-cn/docs/connecting-machines/) · [远程访问](https://herdr.dev/zh-cn/docs/persistence-remote/) · [集成](https://herdr.dev/zh-cn/docs/integrations/) · [为智能体添加 herdr 支持](https://herdr.dev/zh-cn/docs/add-herdr-support/) · [插件](https://herdr.dev/zh-cn/docs/plugins/) · [socket api](https://herdr.dev/zh-cn/docs/socket-api/)
