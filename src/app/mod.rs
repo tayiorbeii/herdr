@@ -1542,6 +1542,56 @@ active_tab_fg = "reset"
     }
 
     #[test]
+    fn pane_border_colors_follow_common_and_selected_mode() {
+        use crate::terminal_theme::HostAppearance;
+        use ratatui::style::Color;
+
+        let mut config: Config = toml::from_str(
+            r##"
+[ui]
+accent = "red"
+[theme]
+name = "terminal"
+auto_switch = true
+[theme.custom]
+pane_border_inactive = "blue"
+[theme.custom.light]
+accent = "yellow"
+pane_border_active = "green"
+[theme.custom.dark]
+pane_border_inactive = "reset"
+"##,
+        )
+        .unwrap();
+        let (_api_tx, api_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut app = App::new(
+            &config,
+            crate::app::AppPolicy::TEST,
+            None,
+            api_rx,
+            crate::api::EventHub::default(),
+        );
+        // Server-side palette (pane borders are rendered into the server surface).
+        assert_eq!(app.state.palette.pane_border_active, None);
+        assert_eq!(app.state.palette.pane_border_inactive, Some(Color::Reset));
+        assert_eq!(app.state.palette.accent, Color::Red);
+        assert!(app.set_host_terminal_appearance_state(Some(HostAppearance::Light), true));
+        assert_eq!(app.state.palette.pane_border_active, Some(Color::Green));
+        assert_eq!(app.state.palette.pane_border_inactive, Some(Color::Blue));
+        assert_eq!(app.state.palette.accent, Color::Yellow);
+
+        // Mode tables apply only with auto_switch.
+        config.theme.auto_switch = false;
+        let runtime = theme_runtime_config(&config, true);
+        for appearance in [HostAppearance::Light, HostAppearance::Dark] {
+            let (manual, _) = resolve_effective_theme(&runtime, Some(appearance));
+            assert_eq!(manual.pane_border_active, None);
+            assert_eq!(manual.pane_border_inactive, Some(Color::Blue));
+            assert_eq!(manual.accent, Color::Red);
+        }
+    }
+
+    #[test]
     fn startup_restores_preview_update_available_from_saved_notes() {
         let _guard = config_env_lock().lock().unwrap();
         let path = temp_config_path("startup-preview-update-available");
@@ -1783,6 +1833,53 @@ active_tab_fg = "reset"
         assert_eq!(toast.kind, crate::app::state::ToastKind::UpdateInstalled);
         assert_eq!(toast.title, "reloaded config");
         assert_eq!(toast.context, "using config.toml");
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_config_applies_and_removes_pane_border_colors() {
+        use ratatui::style::Color;
+
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-pane-border-colors");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            "[update]\nversion_check = false\nmanifest_check = false\n",
+        )
+        .unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+
+        let mut app = test_app();
+        let baseline = app.state.palette.clone();
+        assert_eq!(baseline.pane_border_active, None);
+        assert_eq!(baseline.pane_border_inactive, None);
+
+        std::fs::write(
+            &path,
+            "[update]\nversion_check = false\nmanifest_check = false\n[theme.custom]\npane_border_active = \"#010203\"\npane_border_inactive = \"reset\"\n",
+        )
+        .unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert_eq!(
+            app.state.palette.pane_border_active,
+            Some(Color::Rgb(1, 2, 3))
+        );
+        assert_eq!(app.state.palette.pane_border_inactive, Some(Color::Reset));
+        assert_eq!(app.state.palette.accent, baseline.accent);
+        assert_eq!(app.state.palette.overlay0, baseline.overlay0);
+
+        std::fs::write(
+            &path,
+            "[update]\nversion_check = false\nmanifest_check = false\n",
+        )
+        .unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert_eq!(app.state.palette, baseline);
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());

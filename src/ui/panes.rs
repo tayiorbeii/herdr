@@ -499,15 +499,19 @@ fn render_pane_borders(
         }
         let cell = &mut buf[(x, y)];
         cell.set_symbol(symbol);
-        let color = if focused {
-            app.palette.accent
-        } else {
-            app.palette.overlay0
-        };
-        cell.set_style(Style::default().fg(color));
+        cell.set_style(Style::default().fg(pane_border_color(&app.palette, focused)));
     }
 
     render_pane_border_titles(app, ws, pane_infos, frame);
+}
+
+/// Pane frame and title focus color; absent overrides follow accent / overlay0.
+fn pane_border_color(palette: &Palette, focused: bool) -> Color {
+    if focused {
+        palette.pane_border_active.unwrap_or(palette.accent)
+    } else {
+        palette.pane_border_inactive.unwrap_or(palette.overlay0)
+    }
 }
 
 fn add_split_border_cells(
@@ -666,12 +670,7 @@ fn render_pane_border_titles(
         if start_x >= end_x {
             continue;
         }
-        let color = if info.is_focused {
-            app.palette.accent
-        } else {
-            app.palette.overlay0
-        };
-        let mut style = Style::default().fg(color);
+        let mut style = Style::default().fg(pane_border_color(&app.palette, info.is_focused));
         if info.is_focused {
             style = style.add_modifier(Modifier::BOLD);
         }
@@ -1171,6 +1170,138 @@ mod tests {
         assert_eq!(buffer[(2, 2)].style().fg, Some(app.palette.accent));
         assert_eq!(buffer[(2, 1)].symbol(), "│");
         assert_eq!(buffer[(2, 1)].style().fg, Some(app.palette.accent));
+    }
+
+    /// Renders a labeled two-pane split through the server surface path and returns the
+    /// buffer plus every pane frame/title position.
+    fn render_two_pane_chrome(palette: Palette) -> (Buffer, std::collections::HashSet<(u16, u16)>) {
+        let mut app = AppState::test_new();
+        app.palette = palette;
+        let mut workspace = Workspace::test_new("chrome");
+        workspace.test_split(ratatui::layout::Direction::Horizontal);
+        let panes: Vec<_> = workspace.tabs[0].panes.keys().copied().collect();
+        for pane in &panes {
+            workspace.tabs[0].runtimes.insert(
+                *pane,
+                TerminalRuntime::test_with_scrollback_bytes(18, 4, 1024, b"content\n"),
+            );
+        }
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+        app.ensure_test_terminals();
+        for pane in &panes {
+            let terminal_id = app.workspaces[0].tabs[0].panes[pane]
+                .attached_terminal_id
+                .clone();
+            app.terminals
+                .get_mut(&terminal_id)
+                .unwrap()
+                .set_manual_label("agent".into());
+        }
+        let runtimes = TerminalRuntimeRegistry::new();
+        let area = Rect::new(0, 0, 40, 6);
+        let layout = crate::ui::compute_tab_surface_for(
+            &app,
+            &runtimes,
+            Some(crate::ui::TabSurfaceTarget {
+                workspace_index: 0,
+                tab_index: 0,
+            }),
+            area,
+            false,
+            Default::default(),
+        );
+        let mut chrome = std::collections::HashSet::new();
+        for info in &layout.pane_infos {
+            let rect = info.rect;
+            for y in rect.y..rect.bottom() {
+                for x in rect.x..rect.right() {
+                    if x == rect.x || x + 1 == rect.right() || y == rect.y || y + 1 == rect.bottom()
+                    {
+                        chrome.insert((x, y));
+                    }
+                }
+            }
+        }
+        let (buffer, _, _, _) =
+            crate::server::render_stream::render_tab_surface_virtual(&app, &runtimes, layout, area);
+        (buffer, chrome)
+    }
+
+    #[tokio::test]
+    async fn pane_border_colors_absent_match_accent_and_overlay0() {
+        let palette = Palette::catppuccin();
+        assert_ne!(palette.accent, palette.overlay0);
+        let (buffer, chrome) = render_two_pane_chrome(palette.clone());
+        let mut focused_bold_title = false;
+        let mut seen = (false, false);
+        for &(x, y) in &chrome {
+            let cell = &buffer[(x, y)];
+            if cell.symbol().trim().is_empty() {
+                continue;
+            }
+            if cell.fg == palette.accent {
+                seen.0 = true;
+                focused_bold_title |=
+                    cell.symbol() == "a" && cell.modifier.contains(Modifier::BOLD);
+            } else {
+                assert_eq!(cell.fg, palette.overlay0, "cell: {x},{y}");
+                assert!(!cell.modifier.contains(Modifier::BOLD), "cell: {x},{y}");
+                seen.1 = true;
+            }
+        }
+        assert_eq!(seen, (true, true));
+        assert!(focused_bold_title);
+        // Pane content is rendered so the override test's non-chrome comparison is not vacuous.
+        let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+        assert_eq!(text.matches("content").count(), 2);
+    }
+
+    #[tokio::test]
+    async fn pane_border_color_overrides_change_only_pane_chrome() {
+        use ratatui::style::Color;
+
+        let base = Palette::catppuccin();
+        let (baseline, chrome) = render_two_pane_chrome(base.clone());
+        for (active, inactive, expected_active, expected_inactive) in [
+            (Some("red"), None, Color::Red, base.overlay0),
+            (None, Some("green"), base.accent, Color::Green),
+            (Some("red"), Some("green"), Color::Red, Color::Green),
+            (Some("reset"), Some("default"), Color::Reset, Color::Reset),
+            (
+                Some("#123456"),
+                Some("#123456"),
+                Color::Rgb(18, 52, 86),
+                Color::Rgb(18, 52, 86),
+            ),
+            (Some("not-a-color"), Some("bogus"), Color::Cyan, Color::Cyan),
+        ] {
+            let custom = crate::config::CustomThemeColors {
+                pane_border_active: active.map(Into::into),
+                pane_border_inactive: inactive.map(Into::into),
+                ..Default::default()
+            };
+            let palette = base.clone().with_overrides(&custom);
+            assert_eq!(palette.accent, base.accent);
+            assert_eq!(palette.overlay0, base.overlay0);
+            let (buffer, _) = render_two_pane_chrome(palette);
+            for (index, before) in baseline.content.iter().enumerate() {
+                let (x, y) = baseline.pos_of(index);
+                let mut expected = before.clone();
+                if chrome.contains(&(x, y)) {
+                    if before.fg == base.accent {
+                        expected.fg = expected_active;
+                    } else if before.fg == base.overlay0 {
+                        expected.fg = expected_inactive;
+                    }
+                }
+                assert_eq!(
+                    buffer[(x, y)],
+                    expected,
+                    "active: {active:?}, inactive: {inactive:?}, cell: {x},{y}"
+                );
+            }
+        }
     }
 
     #[test]
