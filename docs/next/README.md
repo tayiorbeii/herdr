@@ -79,6 +79,8 @@ Customize pane frame and title focus colors with optional `pane_border_active` a
 
 Customize terminal popups with optional `popup_bg` and `popup_border` under `[theme.custom]` (or its `light`/`dark` subtables with `auto_switch`). Omitted colors keep the existing popup look; explicit program backgrounds inside the popup are kept. See [configuration](https://herdr.dev/docs/configuration/).
 
+Tint unfocused panes with an optional `pane_inactive_bg` under `[theme.custom]` (or its `light`/`dark` subtables with `auto_switch`). Only terminal-default backgrounds change; program colors, reverse video, selections, and the focused pane stay as they are. Omitting it keeps the current look. See [configuration](https://herdr.dev/docs/configuration/).
+
 ## thanks
 
 every past sponsor and backer is listed in [SPONSORS.md](./SPONSORS.md) — thank you 🐑

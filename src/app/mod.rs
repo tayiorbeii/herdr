@@ -1458,6 +1458,47 @@ popup_bg = "reset"
     }
 
     #[test]
+    fn pane_inactive_bg_follows_common_legacy_accent_and_selected_mode() {
+        use crate::terminal_theme::HostAppearance;
+        use ratatui::style::Color;
+
+        let mut config: Config = toml::from_str(
+            r##"
+[ui]
+accent = "red"
+[theme]
+name = "terminal"
+auto_switch = true
+[theme.custom]
+pane_inactive_bg = "blue"
+[theme.custom.light]
+pane_inactive_bg = "green"
+[theme.custom.dark]
+pane_inactive_bg = "reset"
+"##,
+        )
+        .unwrap();
+        let runtime = client_theme_runtime_from_config(&config);
+        let dark = client_palette_from_config(&config);
+        assert_eq!(dark.pane_inactive_bg, Some(Color::Reset));
+        assert_eq!(dark.accent, Color::Red);
+        let light = client_palette_for_appearance(&runtime, HostAppearance::Light);
+        assert_eq!(light.pane_inactive_bg, Some(Color::Green));
+
+        config.theme.auto_switch = false;
+        let runtime = client_theme_runtime_from_config(&config);
+        for appearance in [HostAppearance::Light, HostAppearance::Dark] {
+            let manual = client_palette_for_appearance(&runtime, appearance);
+            assert_eq!(manual.pane_inactive_bg, Some(Color::Blue));
+            assert_eq!(manual.accent, Color::Red);
+        }
+        assert_eq!(
+            client_palette_from_config(&Config::default()).pane_inactive_bg,
+            None
+        );
+    }
+
+    #[test]
     fn theme_auto_switch_is_opt_in_and_preserves_manual_default() {
         let mut config = Config::default();
         config.theme.name = Some("tokyo-night".to_string());
