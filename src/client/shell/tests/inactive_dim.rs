@@ -568,3 +568,201 @@ fn inactive_pane_dim_records_host_foreground_and_palette_replies() {
     assert!(!outcome.repaint, "no extra repaint while dimming is off");
     assert_eq!(off.host_foreground, Some(DARK_FG));
 }
+
+// D1 x IB1: `pane_inactive_bg` resolves first and D1 never changes backgrounds. Eligibility
+// stays "logical background was the terminal default"; the blend target is the displayed
+// background (the tint when set, else the host default background).
+const TINT: RgbColor = RgbColor {
+    r: 32,
+    g: 64,
+    b: 96,
+};
+const TINT_CONFIG: &str = "[theme.custom]\npane_inactive_bg = \"#204060\"\n";
+const DIM_CONFIG: &str = "[ui]\ninactive_pane_dim_percent = 50\n";
+
+/// Asserts `styled` equals `baseline` except, inside `rect`, cells whose baseline background is
+/// the terminal default: they take `tint` (when set) as background and, when `dim_toward` is
+/// set and the cell is not faint, the blended foreground. Returns the number of dimmed cells.
+fn assert_inactive_style(
+    baseline: &FrameData,
+    styled: &FrameData,
+    rect: Rect,
+    tint: Option<RgbColor>,
+    dim_toward: Option<RgbColor>,
+) -> usize {
+    let mut dimmed = 0;
+    for y in 0..baseline.height {
+        for x in 0..baseline.width {
+            let before = cell_at(baseline, x, y);
+            let after = cell_at(styled, x, y);
+            let mut expected = before.clone();
+            if rect.contains(ratatui::layout::Position::new(x, y))
+                && before.bg == packed(Color::Reset)
+            {
+                if let Some(tint) = tint {
+                    expected.bg = packed(Color::Rgb(tint.r, tint.g, tint.b));
+                }
+                if let Some(target) = dim_toward {
+                    if before.modifier & Modifier::DIM.bits() == 0 {
+                        if let Some(fg) = expected_fg(before.fg, target, DARK_FG, 50) {
+                            expected.fg = fg;
+                            dimmed += 1;
+                        }
+                    }
+                }
+            }
+            assert_eq!(after, &expected, "cell ({x}, {y})");
+        }
+    }
+    dimmed
+}
+
+#[test]
+fn inactive_pane_dim_blends_toward_inactive_pane_background_tint() {
+    let host = (DARK_BG, DARK_FG);
+    for left_focused in [true, false] {
+        let baseline = compose(&mut state_with("", Some(host)), split_surface(left_focused));
+        let mut both_state = state_with(&format!("{DIM_CONFIG}{TINT_CONFIG}"), Some(host));
+        let both = compose(&mut both_state, split_surface(left_focused));
+        let inactive = inner_rect(&both_state, if left_focused { "pane_2" } else { "pane_1" });
+
+        // Both keys: tinted backgrounds, foregrounds blended toward the tint.
+        let dimmed = assert_inactive_style(&baseline, &both, inactive, Some(TINT), Some(TINT));
+        assert_eq!(dimmed, if left_focused { 28 } else { 12 });
+        let first = cell_at(&both, inactive.x, inactive.y);
+        assert_eq!(first.fg, packed(Color::Rgb(116, 132, 148)), "default fg");
+        assert_eq!(first.bg, packed(Color::Rgb(32, 64, 96)), "tinted bg");
+        let explicit = cell_at(&both, inactive.x + 5, inactive.y);
+        assert_eq!(
+            (explicit.fg, explicit.bg),
+            (packed(Color::Rgb(1, 2, 3)), packed(Color::Indexed(4))),
+            "explicit background keeps both colors"
+        );
+
+        // One key unset: exactly the other slice alone.
+        let tint_only = compose(
+            &mut state_with(TINT_CONFIG, Some(host)),
+            split_surface(left_focused),
+        );
+        assert_eq!(
+            assert_inactive_style(&baseline, &tint_only, inactive, Some(TINT), None),
+            0
+        );
+        let dim_only = compose(
+            &mut state_with(DIM_CONFIG, Some(host)),
+            split_surface(left_focused),
+        );
+        assert_eq!(
+            assert_only_eligible_fg_dimmed(&baseline, &dim_only, &[inactive], host, 50),
+            dimmed
+        );
+    }
+}
+
+#[test]
+fn inactive_pane_dim_resolves_named_tint_through_host_palette() {
+    let host = (DARK_BG, DARK_FG);
+    let baseline = compose(&mut state_with("", Some(host)), split_surface(true));
+    let named = |color: &str| {
+        let mut state = state_with(
+            &format!("{DIM_CONFIG}[theme.custom]\npane_inactive_bg = \"{color}\"\n"),
+            Some(host),
+        );
+        let frame = compose(&mut state, split_surface(true));
+        (frame, inner_rect(&state, "pane_2"))
+    };
+    // `red` is host palette entry 1, which the host reported.
+    let (red, inactive) = named("red");
+    let reported = RgbColor { r: 255, g: 0, b: 0 };
+    let tint = |frame: &FrameData| cell_at(frame, inactive.x, inactive.y).bg;
+    assert_eq!(tint(&red), packed(Color::Red));
+    let first = cell_at(&red, inactive.x, inactive.y);
+    assert_eq!(
+        first.fg,
+        expected_fg(packed(Color::Reset), reported, DARK_FG, 50).unwrap()
+    );
+    // `blue` was never reported: the tint still applies, the dim cannot resolve its target.
+    let (blue, _) = named("blue");
+    let tint_only = compose(
+        &mut state_with("[theme.custom]\npane_inactive_bg = \"blue\"\n", Some(host)),
+        split_surface(true),
+    );
+    assert_eq!(blue, tint_only);
+    assert_ne!(blue, baseline);
+}
+
+#[test]
+fn inactive_pane_dim_and_tint_apply_to_retained_surface_patch_fast_path() {
+    let host = (DARK_BG, DARK_FG);
+    let mut state = state_with(&format!("{DIM_CONFIG}{TINT_CONFIG}"), Some(host));
+    let composed = compose(&mut state, split_surface(true));
+    let row = |x: u16, y: u16| crate::protocol::PaneSurfacePatchRow {
+        x,
+        y,
+        cells: vec![
+            CellData {
+                symbol: "N".into(),
+                fg: packed(Color::Reset),
+                bg: packed(Color::Reset),
+                modifier: 0,
+                skip: false,
+                hyperlink: None,
+            };
+            8
+        ],
+    };
+    let mut panes = split_surface(true).panes;
+    for pane in &mut panes {
+        pane.content_revision = 2;
+    }
+    let patch = crate::protocol::PaneSurfacePatch {
+        boot_id: "boot-1".into(),
+        projection_revision: 1,
+        base_surface_revision: 1,
+        surface_revision: 2,
+        rows: vec![row(1, 1), row(11, 2)],
+        panes,
+        cursor: None,
+    };
+    let ClientPaneSurfacePatchOutcome::Applied(Some(composed_patch)) =
+        state.apply_pane_surface_patch(patch)
+    else {
+        panic!("expected the fast retained patch path");
+    };
+    let presented =
+        apply_composed_surface_patch(&composed, composed_patch).expect("apply composed patch");
+    let full = state.compose(106, 20).expect("full compose").frame.clone();
+    assert_eq!(
+        presented, full,
+        "fast patch presents what a full compose shows"
+    );
+
+    let focused = inner_rect(&state, "pane_1");
+    let inactive = inner_rect(&state, "pane_2");
+    for offset in 0..8 {
+        let focused_cell = cell_at(&presented, focused.x + offset, focused.y);
+        assert_eq!(
+            (focused_cell.fg, focused_cell.bg),
+            (packed(Color::Reset), packed(Color::Reset))
+        );
+        let inactive_cell = cell_at(&presented, inactive.x + offset, inactive.y + 2);
+        assert_eq!(
+            (
+                inactive_cell.symbol.as_str(),
+                inactive_cell.fg,
+                inactive_cell.bg
+            ),
+            (
+                "N",
+                packed(Color::Rgb(116, 132, 148)),
+                packed(Color::Rgb(32, 64, 96))
+            )
+        );
+    }
+    let stored = &state.pane_surface.as_ref().expect("surface").frame;
+    assert_eq!(
+        (cell_at(stored, 11, 2).fg, cell_at(stored, 11, 2).bg),
+        (packed(Color::Reset), packed(Color::Reset)),
+        "stored surface untouched"
+    );
+}

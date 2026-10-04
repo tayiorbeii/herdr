@@ -66,24 +66,41 @@ impl InactivePaneDim {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn apply_cell(&self, cell: &mut CellData) {
-        if cell.bg != 0 || cell.modifier & DIM_BIT != 0 {
+        if cell.bg != 0 {
+            return;
+        }
+        self.apply_default_background_cell(cell);
+    }
+
+    /// Blends a cell the caller already found on the terminal-default background. The check
+    /// happens before any `pane_inactive_bg` tint replaces that background.
+    pub(super) fn apply_default_background_cell(&self, cell: &mut CellData) {
+        if cell.modifier & DIM_BIT != 0 {
             return;
         }
         if let Some(fg) = self.foreground(cell.fg) {
             cell.fg = fg;
         }
     }
+}
 
-    pub(super) fn apply_rect(&self, frame: &mut FrameData, rect: Rect) {
-        let rect = rect.intersection(Rect::new(0, 0, frame.width, frame.height));
-        for y in rect.top()..rect.bottom() {
-            let start = usize::from(y) * usize::from(frame.width);
-            let row = start + usize::from(rect.left())..start + usize::from(rect.right());
-            if let Some(cells) = frame.cells.get_mut(row) {
-                cells.iter_mut().for_each(|cell| self.apply_cell(cell));
-            }
-        }
+/// RGB for a packed wire color through the host's reported palette, or `None` when the host
+/// did not report it (or the color is the terminal default).
+fn packed_host_rgb(packed: u32, palette: &[Option<RgbColor>; 256]) -> Option<RgbColor> {
+    match packed >> 24 {
+        0x00 => match packed & 0xFF {
+            code @ 0x01..=0x10 => palette[code as usize - 1],
+            _ => None,
+        },
+        0x01 => palette[(packed & 0xFF) as usize],
+        0x02 => Some(RgbColor {
+            r: (packed >> 16) as u8,
+            g: (packed >> 8) as u8,
+            b: packed as u8,
+        }),
+        _ => None,
     }
 }
 
@@ -103,15 +120,20 @@ fn pack(color: RgbColor) -> u32 {
 }
 
 impl ClientShellState {
-    /// The active de-emphasis, or `None` when it is off, outside terminal mode, or the host
-    /// default background is unknown.
+    /// The active de-emphasis, or `None` when it is off, outside terminal mode, or the
+    /// displayed background is unknown. Text blends toward the background the cell is shown
+    /// on: the `pane_inactive_bg` tint when set, otherwise the host default background.
     pub(super) fn inactive_pane_dim(&self) -> Option<InactivePaneDim> {
         if self.mode != ClientShellMode::Terminal {
             return None;
         }
+        let background = match super::composition::inactive_pane_tint(&self.config.palette) {
+            Some(tint) => packed_host_rgb(tint, &self.host_palette),
+            None => self.host_background,
+        };
         InactivePaneDim::new(
             self.config.inactive_pane_dim_percent,
-            self.host_background,
+            background,
             self.host_foreground,
             &self.host_palette,
         )

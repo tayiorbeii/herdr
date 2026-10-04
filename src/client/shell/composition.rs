@@ -348,26 +348,13 @@ impl ClientShellState {
         if self.config.rounded_borders {
             super::borders::round_pane_corners(&mut frame, &surface.panes, layout.pane_surface);
         }
-        if let Some(tint) = inactive_pane_tint(&self.config.palette) {
-            paint_inactive_pane_default_background(&mut frame, surface, layout.pane_surface, tint);
-        }
-        if let Some(dim) = self.inactive_pane_dim() {
-            let area = layout.pane_surface;
-            let copied = Rect::new(
-                area.x,
-                area.y,
-                surface.frame.width.min(area.width),
-                surface.frame.height.min(area.height),
+        if let Some(style) = InactivePaneStyle::resolve(self) {
+            paint_inactive_pane_default_background(
+                &mut frame,
+                surface,
+                layout.pane_surface,
+                &style,
             );
-            for pane in surface.panes.iter().filter(|pane| !pane.focused) {
-                let inner = Rect::new(
-                    area.x.saturating_add(pane.inner_rect.x),
-                    area.y.saturating_add(pane.inner_rect.y),
-                    pane.inner_rect.width,
-                    pane.inner_rect.height,
-                );
-                dim.apply_rect(&mut frame, inner.intersection(copied));
-            }
         }
         restore_mode_bar(&mut frame, mode_bar, mode_bar_cells.as_deref());
         let mut occlusion = crate::kitty_graphics::surface::Occlusion::default();
@@ -784,24 +771,64 @@ pub(super) fn inactive_pane_tint(palette: &crate::app::state::Palette) -> Option
         .map(crate::protocol::color_to_u32)
 }
 
-/// Pane-agnostic cell rule shared by full composition and retained surface patches: a
-/// terminal-default (`Reset`) background takes the tint. Callers select cells inside unfocused
-/// panes' `inner_rect` once per pane or row span. The server sends explicit ANSI backgrounds as
-/// indexed/RGB and resolves reverse video to a concrete color, so only default cells match.
-fn tint_default_background_cell(cell: &mut crate::protocol::CellData, tint: u32) {
-    if cell.bg == crate::protocol::color_to_u32(ratatui::style::Color::Reset) {
-        cell.bg = tint;
+/// Unfocused-pane presentation, resolved once per compose or retained patch: the
+/// `pane_inactive_bg` tint and the `inactive_pane_dim_percent` de-emphasis. Both act only on
+/// cells whose logical background is the terminal default. The tint resolves first; the dim
+/// keeps that pre-tint eligibility and blends toward the displayed background (the tint when
+/// set). It never changes backgrounds itself.
+pub(super) struct InactivePaneStyle {
+    tint: Option<u32>,
+    dim: Option<super::inactive_dim::InactivePaneDim>,
+}
+
+impl InactivePaneStyle {
+    pub(super) fn resolve(state: &ClientShellState) -> Option<Self> {
+        let tint = inactive_pane_tint(&state.config.palette);
+        let dim = state.inactive_pane_dim();
+        (tint.is_some() || dim.is_some()).then_some(Self { tint, dim })
+    }
+
+    /// Pane-agnostic cell rule shared by full composition and retained surface patches.
+    /// Callers select cells inside unfocused panes' `inner_rect` once per pane or row span.
+    /// The server sends explicit ANSI backgrounds as indexed/RGB and resolves reverse video to
+    /// a concrete color, so only default cells match.
+    fn apply_cell(&self, cell: &mut crate::protocol::CellData) {
+        if cell.bg != crate::protocol::color_to_u32(ratatui::style::Color::Reset) {
+            return;
+        }
+        if let Some(dim) = &self.dim {
+            dim.apply_default_background_cell(cell);
+        }
+        if let Some(tint) = self.tint {
+            cell.bg = tint;
+        }
     }
 }
 
-/// Tints one retained patch row starting at surface-relative `(x, y)`: unfocused pane spans
-/// crossing the row are found once per row, then only their cells are visited.
+/// Tints one retained patch row with only `pane_inactive_bg` applied.
+#[cfg(test)]
 pub(super) fn tint_inactive_pane_row(
     panes: &[crate::protocol::PaneSurfacePane],
     x: u16,
     y: u16,
     cells: &mut [crate::protocol::CellData],
     tint: u32,
+) {
+    let style = InactivePaneStyle {
+        tint: Some(tint),
+        dim: None,
+    };
+    style_inactive_pane_row(panes, x, y, cells, &style);
+}
+
+/// Styles one retained patch row starting at surface-relative `(x, y)`: unfocused pane spans
+/// crossing the row are found once per row, then only their cells are visited.
+pub(super) fn style_inactive_pane_row(
+    panes: &[crate::protocol::PaneSurfacePane],
+    x: u16,
+    y: u16,
+    cells: &mut [crate::protocol::CellData],
+    style: &InactivePaneStyle,
 ) {
     let row_end = usize::from(x) + cells.len();
     for pane in panes.iter().filter(|pane| !pane.focused) {
@@ -816,18 +843,18 @@ pub(super) fn tint_inactive_pane_row(
         }
         let offset = usize::from(x);
         for cell in &mut cells[start - offset..end - offset] {
-            tint_default_background_cell(cell, tint);
+            style.apply_cell(cell);
         }
     }
 }
 
-/// Tints default backgrounds inside unfocused panes after the surface blit. Selection and copy
-/// highlights are painted afterwards.
+/// Tints and de-emphasizes default-background cells inside unfocused panes after the surface
+/// blit, in one pass per pane. Selection and copy highlights are painted afterwards.
 fn paint_inactive_pane_default_background(
     frame: &mut FrameData,
     surface: &crate::protocol::PaneSurfaceFrame,
     area: Rect,
-    tint: u32,
+    style: &InactivePaneStyle,
 ) {
     let width = usize::from(frame.width);
     // Only cells copied from the surface by `blit_pane_surface`.
@@ -849,7 +876,7 @@ fn paint_inactive_pane_default_background(
             let row = usize::from(y) * width;
             for x in inner.left()..inner.right() {
                 if let Some(cell) = frame.cells.get_mut(row + usize::from(x)) {
-                    tint_default_background_cell(cell, tint);
+                    style.apply_cell(cell);
                 }
             }
         }
