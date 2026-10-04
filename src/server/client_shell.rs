@@ -1114,6 +1114,56 @@ mod tests {
         }
     }
 
+    /// B1 x S1/S2-pane: corner detection compares each pane's published rect with its
+    /// content rect. Gaps keep one rounded frame per pane, padding inside a frame does not
+    /// move the corners, and padding without frames (content rect inset, corner cells
+    /// blank) rounds nothing.
+    #[tokio::test(flavor = "current_thread")]
+    async fn rounded_borders_follow_pane_gap_cells_and_pane_padding() {
+        let build = || rounded_test_workspace(2, false);
+        let ui = |toml_text: &'static str| {
+            move |config: &mut crate::config::Config| {
+                let parsed: crate::config::Config = toml::from_str(toml_text).expect("ui config");
+                config.ui = parsed.ui;
+            }
+        };
+        let arcs = |changes: &Vec<((u16, u16), String, String)>| {
+            let mut arcs: Vec<&str> = changes.iter().map(|(_, _, after)| after.as_str()).collect();
+            arcs.sort_unstable();
+            arcs.concat()
+        };
+        let plain = rounded_corner_changes(build, ui("[ui]\n"));
+        assert_eq!(arcs(&plain), "╭╭╮╮╯╯╰╰");
+        for spaced in [
+            "[ui]\npane_gap_cells = 2\n",
+            "[ui]\npane_padding_cells = 1\n",
+            "[ui]\npane_gap_cells = 2\npane_padding_cells = 1\n",
+        ] {
+            assert_eq!(
+                arcs(&rounded_corner_changes(build, ui(spaced))),
+                arcs(&plain),
+                "{spaced}"
+            );
+        }
+        assert_eq!(
+            arcs(&rounded_corner_changes(
+                build,
+                ui("[ui]\npane_gap_cells = 0\n")
+            )),
+            "╭╮╯╰",
+            "zero gap shares dividers: only the grid's outer corners round"
+        );
+        for frameless in [
+            "[ui]\npane_borders = \"off\"\npane_padding_cells = 1\n",
+            "[ui]\npane_borders = \"off\"\npane_gap_cells = 2\npane_padding_cells = 1\n",
+        ] {
+            assert!(
+                rounded_corner_changes(build, ui(frameless)).is_empty(),
+                "{frameless}"
+            );
+        }
+    }
+
     fn focus_weight_app(pane_focus_weight: bool) -> (crate::app::App, [crate::layout::PaneId; 2]) {
         let mut config = crate::config::Config::default();
         config.ui.pane_focus_weight = pane_focus_weight;

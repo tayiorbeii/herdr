@@ -494,6 +494,7 @@ impl App {
             pane_focus_weight: config.ui.pane_focus_weight,
             pane_heavy_borders: config.ui.pane_heavy_borders,
             pane_gap_cells: config.ui.pane_gap_cells(),
+            pane_padding_cells: config.ui.pane_padding_cells(),
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: String::new(),
@@ -837,6 +838,7 @@ impl App {
                     &config.ui.window_title,
                 ));
                 diagnostics.extend(config.ui.invalid_pane_gap_cells_diagnostic());
+                diagnostics.extend(config.ui.pane_padding_cells_diagnostic());
 
                 self.loaded_host_cursor = config.ui.host_cursor;
                 self.state.confirm_close = config.ui.confirm_close;
@@ -847,6 +849,7 @@ impl App {
                 self.state.pane_focus_weight = config.ui.pane_focus_weight;
                 self.state.pane_heavy_borders = config.ui.pane_heavy_borders;
                 self.state.pane_gap_cells = config.ui.pane_gap_cells();
+                self.state.pane_padding_cells = config.ui.pane_padding_cells();
                 self.state.show_agent_labels_on_pane_borders =
                     config.ui.show_agent_labels_on_pane_borders;
                 self.configure_tab_bar_status(
@@ -2245,6 +2248,48 @@ pane_border_inactive = "reset"
     }
 
     #[test]
+    fn reload_config_applies_pane_padding_and_removal_restores_baseline() {
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-pane-padding");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let mut app = test_app();
+        assert_eq!(app.state.pane_padding_cells, 0);
+
+        std::fs::write(&path, "[ui]\npane_padding_cells = 2\n").unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert_eq!(app.state.pane_padding_cells, 2);
+
+        // A malformed value disables only padding; sibling [ui] keys still apply.
+        std::fs::write(
+            &path,
+            "[ui]\npane_padding_cells = \"wide\"\npane_borders = \"always\"\n",
+        )
+        .unwrap();
+        let report = app.reload_config();
+        assert_ne!(report.status, crate::config::ConfigReloadStatus::Failed);
+        assert!(report.diagnostics.iter().any(|diagnostic| diagnostic
+            == "ui.pane_padding_cells = \"wide\" is not a whole number of cells from 0 to 65535; disabling pane padding"));
+        assert_eq!(app.state.pane_padding_cells, 0);
+        assert_eq!(
+            app.state.pane_borders,
+            crate::config::PaneBordersConfig::Always
+        );
+
+        std::fs::write(&path, "[ui]\npane_padding_cells = 3\n").unwrap();
+        app.reload_config();
+        assert_eq!(app.state.pane_padding_cells, 3);
+        std::fs::write(&path, "").unwrap();
+        let report = app.reload_config();
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert_eq!(app.state.pane_padding_cells, 0);
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
     fn reload_config_disables_invalid_binding_but_applies_valid_keymap_and_other_sections() {
         let _guard = config_env_lock().lock().unwrap();
         let path = temp_config_path("reload-config-invalid-keybind");
@@ -3219,6 +3264,80 @@ pane_border_inactive = "reset"
         assert_eq!(spawned, with_gap);
         relayout(&app, ws_idx);
         assert_eq!(size_of(&app, ws_idx, middle), spawned);
+
+        for (_terminal_id, runtime) in app.terminal_runtimes.drain().collect::<Vec<_>>() {
+            runtime.shutdown();
+        }
+    }
+
+    #[tokio::test]
+    async fn hidden_panes_start_at_their_padded_size() {
+        let mut app = test_app();
+        app.state.pane_padding_cells = 2;
+        app.state.workspaces = vec![Workspace::test_new("visible")];
+        app.state.ensure_test_terminals();
+        app.state.active = Some(0);
+        app.state.selected = 0;
+        let area = Rect::new(0, 0, 120, 40);
+        crate::ui::compute_view_without_resizing_panes(
+            &mut app.state,
+            &app.terminal_runtimes,
+            area,
+        );
+
+        let size_of = |app: &App, ws_idx: usize, pane_id| {
+            app.state
+                .runtime_for_pane_in_workspace(&app.terminal_runtimes, ws_idx, pane_id)
+                .unwrap()
+                .current_size()
+        };
+        let relayout = |app: &App, ws_idx: usize| {
+            crate::ui::resize_tab_surface(
+                &app.state,
+                &app.terminal_runtimes,
+                ws_idx,
+                0,
+                area,
+                crate::kitty_graphics::HostCellSize::default(),
+            );
+        };
+
+        app.state.pane_padding_cells = 0;
+        let unpadded = app.state.new_pane_size(crate::ui::NewPanePlacement::Alone);
+        app.state.pane_padding_cells = 2;
+        let ws_idx = app
+            .create_workspace_with_options(std::env::temp_dir(), false)
+            .unwrap();
+        assert_eq!(app.state.active, Some(0));
+        let root = app.state.workspaces[ws_idx].tabs[0].root_pane;
+        let spawned = size_of(&app, ws_idx, root);
+        assert_eq!(spawned, (unpadded.0 - 4, unpadded.1 - 4));
+        relayout(&app, ws_idx);
+        assert_eq!(size_of(&app, ws_idx, root), spawned);
+
+        let response =
+            app.handle_api_request_after_internal_events_drained(crate::api::schema::Request {
+                id: "req_padded_split_size".into(),
+                method: crate::api::schema::Method::PaneSplit(
+                    crate::api::schema::PaneSplitParams {
+                        workspace_id: None,
+                        target_pane_id: Some(app.pane_info(ws_idx, root).unwrap().pane_id),
+                        direction: crate::api::schema::SplitDirection::Down,
+                        ratio: Some(0.3),
+                        cwd: None,
+                        focus: false,
+                        right_click: Default::default(),
+                        env: Default::default(),
+                    },
+                ),
+            });
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        let (_, new_pane) = app
+            .parse_pane_id(response["result"]["pane"]["pane_id"].as_str().unwrap())
+            .unwrap();
+        let spawned = size_of(&app, ws_idx, new_pane);
+        relayout(&app, ws_idx);
+        assert_eq!(size_of(&app, ws_idx, new_pane), spawned);
 
         for (_terminal_id, runtime) in app.terminal_runtimes.drain().collect::<Vec<_>>() {
             runtime.shutdown();
