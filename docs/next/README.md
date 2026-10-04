@@ -57,6 +57,8 @@ run your agents, split panes, walk away. `ctrl+b q` detaches, `herdr` reattaches
 
 Opt in to rounded corners on existing interface frames with `rounded_borders = true` under `[ui]`. The default stays unchanged; terminal content, dimensions and shared junctions are preserved. See [configuration](https://herdr.dev/docs/configuration/).
 
+Opt in to a non-color focus cue with `pane_focus_weight = true` under `[ui]`: the focused pane's border uses heavy line glyphs beside its accent color. The default stays unchanged, and pane sizes and dividers are preserved. See [configuration](https://herdr.dev/docs/configuration/).
+
 ## docs
 
 everything lives at [herdr.dev/docs](https://herdr.dev/docs/): [quick start](https://herdr.dev/docs/quick-start/) · [concepts](https://herdr.dev/docs/concepts/) · [supported agents](https://herdr.dev/docs/agents/) · [keyboard](https://herdr.dev/docs/keyboard/) · [configuration](https://herdr.dev/docs/configuration/) · [session state](https://herdr.dev/docs/session-state/) · [connecting machines](https://herdr.dev/docs/connecting-machines/) · [remote](https://herdr.dev/docs/persistence-remote/) · [integrations](https://herdr.dev/docs/integrations/) · [add herdr support to your agent](https://herdr.dev/docs/add-herdr-support/) · [plugins](https://herdr.dev/docs/plugins/) · [socket api](https://herdr.dev/docs/socket-api/)
