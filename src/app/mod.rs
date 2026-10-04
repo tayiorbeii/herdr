@@ -497,6 +497,7 @@ impl App {
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
             pane_title_tokens: config.ui.pane_title_tokens.clone(),
             pane_manual_label_first: config.ui.pane_manual_label_first,
+            pane_border_identity_token: config.ui.pane_border_identity_token.clone(),
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: String::new(),
             reveal_hidden_cursor_for_cjk_ime: config.experimental.reveal_hidden_cursor_for_cjk_ime,
@@ -855,6 +856,8 @@ impl App {
                     config.ui.show_agent_labels_on_pane_borders;
                 self.state.pane_title_tokens = config.ui.pane_title_tokens.clone();
                 self.state.pane_manual_label_first = config.ui.pane_manual_label_first;
+                self.state.pane_border_identity_token =
+                    config.ui.pane_border_identity_token.clone();
                 self.configure_tab_bar_status(
                     &config.ui.tab_bar_right,
                     &config.ui.tab_bar_right_separator,
@@ -2064,6 +2067,31 @@ pane_border_inactive = "reset"
         app.apply_live_config(&Config::default(), &[], &[], false);
         assert_eq!(app.state.pane_title_tokens, None);
         assert!(!app.state.pane_manual_label_first);
+    }
+
+    #[test]
+    fn reload_config_applies_and_removes_pane_border_identity_token() {
+        let mut app = test_app();
+        assert_eq!(app.state.pane_border_identity_token, None);
+
+        let config: Config = toml::from_str(
+            "[ui]\npane_border_identity_token = { token = \"$role\", fg = \"#a6e3a1\" }",
+        )
+        .unwrap();
+        let report = app.apply_live_config(&config, &[], &[], false);
+        assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
+        assert_eq!(
+            app.state.pane_border_identity_token,
+            config.ui.pane_border_identity_token
+        );
+        assert!(app.state.pane_border_identity_token.is_some());
+
+        // An invalid [ui] section keeps the previous setting.
+        app.apply_live_config(&Config::default(), &[], &["ui".into()], false);
+        assert!(app.state.pane_border_identity_token.is_some());
+
+        app.apply_live_config(&Config::default(), &[], &[], false);
+        assert_eq!(app.state.pane_border_identity_token, None);
     }
 
     #[test]
