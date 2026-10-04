@@ -200,15 +200,21 @@ pub fn config_path() -> PathBuf {
 }
 
 pub fn config_diagnostic_summary(diagnostics: &[String]) -> Option<String> {
+    let path = config_path();
+    let target = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("config.toml");
+    summarize_config_diagnostics(target, diagnostics)
+}
+
+// Pure summary for a known config file name, so tests need not read the process-wide
+// config path env var that other tests mutate.
+fn summarize_config_diagnostics(target: &str, diagnostics: &[String]) -> Option<String> {
     if diagnostics.is_empty() {
         return None;
     }
 
-    let target = config_path()
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("config.toml")
-        .to_string();
     let read_error = diagnostics
         .iter()
         .any(|diagnostic| diagnostic.starts_with("config read error:"));
@@ -787,7 +793,7 @@ mod tests {
         ];
 
         assert_eq!(
-            config_diagnostic_summary(&diagnostics).as_deref(),
+            summarize_config_diagnostics("config.toml", &diagnostics).as_deref(),
             Some("config.toml; herdr config check")
         );
     }
@@ -800,7 +806,7 @@ mod tests {
         ];
 
         assert_eq!(
-            config_diagnostic_summary(&diagnostics).as_deref(),
+            summarize_config_diagnostics("config.toml", &diagnostics).as_deref(),
             Some("config.toml has unknown keys; herdr config check")
         );
     }
@@ -813,7 +819,7 @@ mod tests {
         ];
 
         assert_eq!(
-            config_diagnostic_summary(&diagnostics).as_deref(),
+            summarize_config_diagnostics("config.toml", &diagnostics).as_deref(),
             Some("config.toml; herdr config check")
         );
     }
@@ -826,7 +832,7 @@ mod tests {
         ];
 
         assert_eq!(
-            config_diagnostic_summary(&diagnostics).as_deref(),
+            summarize_config_diagnostics("config.toml", &diagnostics).as_deref(),
             Some("config.toml invalid; using defaults; herdr config check")
         );
     }
@@ -835,14 +841,14 @@ mod tests {
     fn config_diagnostic_summary_reports_unreadable_config_impact() {
         let startup = vec!["config read error: permission denied; using defaults".to_string()];
         assert_eq!(
-            config_diagnostic_summary(&startup).as_deref(),
+            summarize_config_diagnostics("config.toml", &startup).as_deref(),
             Some("config.toml unreadable; using defaults; herdr config check")
         );
 
         let reload =
             vec!["config read error: permission denied; keeping current config".to_string()];
         assert_eq!(
-            config_diagnostic_summary(&reload).as_deref(),
+            summarize_config_diagnostics("config.toml", &reload).as_deref(),
             Some("config.toml unreadable; keeping current config; herdr config check")
         );
     }
@@ -855,8 +861,29 @@ mod tests {
         ];
 
         assert_eq!(
-            config_diagnostic_summary(&diagnostics).as_deref(),
+            summarize_config_diagnostics("config.toml", &diagnostics).as_deref(),
             Some("config.toml invalid; keeping current config; herdr config check")
+        );
+    }
+
+    #[test]
+    fn config_diagnostic_summary_names_the_configured_path_only_in_the_wrapper() {
+        let _guard = crate::config::test_config_env_lock().lock().unwrap();
+        let path = std::env::temp_dir().join("herdr-config-summary-target.toml");
+        std::env::set_var(CONFIG_PATH_ENV_VAR, &path);
+        let diagnostics = vec!["config read error: permission denied; using defaults".to_string()];
+
+        let wrapper = config_diagnostic_summary(&diagnostics);
+        let pure = summarize_config_diagnostics("config.toml", &diagnostics);
+
+        std::env::remove_var(CONFIG_PATH_ENV_VAR);
+        assert_eq!(
+            wrapper.as_deref(),
+            Some("herdr-config-summary-target.toml unreadable; using defaults; herdr config check")
+        );
+        assert_eq!(
+            pure.as_deref(),
+            Some("config.toml unreadable; using defaults; herdr config check")
         );
     }
 
