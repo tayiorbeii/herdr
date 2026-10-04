@@ -57,6 +57,8 @@ herdr
 
 在 `[ui]` 下设置 `pane_focus_weight = true`，即可启用不依赖颜色的焦点提示：获得焦点的窗格边框在强调色之外改用粗线字符。默认保持不变，窗格尺寸和分隔线均保持原样。参见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
 
+在 `[ui]` 下设置 `pane_heavy_borders = true`，即可用粗线绘制所有窗格边框；与 `pane_focus_weight = true` 同时使用时，获得焦点的窗格改用双线。参见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
+
 在 `[ui]` 下用 `pane_gap_cells = N` 设置分割窗格之间的空白：`0` 共用分隔线，`N` 在窗格边框之间留出 N 个空白单元格。未设置时保持现有的 `pane_gaps` 行为。参见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
 
 在 `[ui]` 下设置 `pane_padding_cells = 1`，可在每个窗格的边框与内容之间留出空白单元格。默认值 `0` 保持原有布局。参见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
