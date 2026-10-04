@@ -1102,6 +1102,69 @@
           "description": "Keep split panes visually separated instead of sharing divider borders."
         },
         {
+          "key": "ui.pane_border_style",
+          "type": "enum",
+          "default": "unset",
+          "description": "Line style of every pane frame: light, rounded (arc corners), heavy, double, or light, heavy and rounded lines with 2, 3 or 4 dashes. Only straight runs are dashed; corners and junctions stay solid, and heavy and double corners stay square. Unset keeps the stock light lines. Malformed values are reported and ignored.",
+          "values": [
+            "light",
+            "rounded",
+            "heavy",
+            "double",
+            "light-dashed-2",
+            "light-dashed-3",
+            "light-dashed-4",
+            "heavy-dashed-2",
+            "heavy-dashed-3",
+            "heavy-dashed-4",
+            "rounded-dashed-2",
+            "rounded-dashed-3",
+            "rounded-dashed-4"
+          ]
+        },
+        {
+          "key": "ui.pane_border_style_active",
+          "type": "enum",
+          "default": "unset",
+          "description": "Line style of the focused pane's frame, including the shared dividers it owns (the cells that get the focus color). Falls back to ui.pane_border_style, then light. Malformed values are reported and ignored.",
+          "values": [
+            "light",
+            "rounded",
+            "heavy",
+            "double",
+            "light-dashed-2",
+            "light-dashed-3",
+            "light-dashed-4",
+            "heavy-dashed-2",
+            "heavy-dashed-3",
+            "heavy-dashed-4",
+            "rounded-dashed-2",
+            "rounded-dashed-3",
+            "rounded-dashed-4"
+          ]
+        },
+        {
+          "key": "ui.pane_border_style_inactive",
+          "type": "enum",
+          "default": "unset",
+          "description": "Line style of unfocused pane frames. Falls back to ui.pane_border_style, then light. Malformed values are reported and ignored.",
+          "values": [
+            "light",
+            "rounded",
+            "heavy",
+            "double",
+            "light-dashed-2",
+            "light-dashed-3",
+            "light-dashed-4",
+            "heavy-dashed-2",
+            "heavy-dashed-3",
+            "heavy-dashed-4",
+            "rounded-dashed-2",
+            "rounded-dashed-3",
+            "rounded-dashed-4"
+          ]
+        },
+        {
           "key": "ui.show_agent_labels_on_pane_borders",
           "type": "boolean",
           "default": "false",

@@ -491,6 +491,7 @@ impl App {
             pane_outer_borders: config.ui.pane_outer_borders,
             pane_scrollbars: config.ui.pane_scrollbars,
             pane_gaps: config.ui.pane_gaps,
+            pane_border_styles: config.ui.pane_border_styles(),
             show_agent_labels_on_pane_borders: config.ui.show_agent_labels_on_pane_borders,
             tab_bar_right: Vec::new(),
             tab_bar_right_separator: String::new(),
@@ -833,6 +834,7 @@ impl App {
                 diagnostics.extend(crate::config::window_title_diagnostics(
                     &config.ui.window_title,
                 ));
+                diagnostics.extend(config.ui.invalid_pane_border_style_diagnostics());
 
                 self.loaded_host_cursor = config.ui.host_cursor;
                 self.state.confirm_close = config.ui.confirm_close;
@@ -840,6 +842,7 @@ impl App {
                 self.state.pane_outer_borders = config.ui.pane_outer_borders;
                 self.state.pane_scrollbars = config.ui.pane_scrollbars;
                 self.state.pane_gaps = config.ui.pane_gaps;
+                self.state.pane_border_styles = config.ui.pane_border_styles();
                 self.state.show_agent_labels_on_pane_borders =
                     config.ui.show_agent_labels_on_pane_borders;
                 self.configure_tab_bar_status(
@@ -1922,6 +1925,77 @@ pane_border_inactive = "reset"
         let report = app.reload_config();
         assert_eq!(report.status, crate::config::ConfigReloadStatus::Applied);
         assert_eq!(app.state.palette, baseline);
+
+        std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
+        let _ = std::fs::remove_dir_all(path.parent().unwrap());
+    }
+
+    #[test]
+    fn reload_config_applies_and_removes_pane_border_styles() {
+        use crate::config::{PaneBorderStyle, PaneBorderStyles};
+        let _guard = config_env_lock().lock().unwrap();
+        let path = temp_config_path("reload-config-pane-border-styles");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::env::set_var(crate::config::CONFIG_PATH_ENV_VAR, &path);
+        let base = "[update]\nversion_check = false\nmanifest_check = false\n[ui]\n";
+
+        let mut app = test_app();
+        assert_eq!(app.state.pane_border_styles, PaneBorderStyles::default());
+        let heavy_double = PaneBorderStyles {
+            all: Some(PaneBorderStyle::Heavy),
+            active: Some(PaneBorderStyle::Double),
+            inactive: None,
+        };
+        for (body, expected, diagnostics) in [
+            (
+                "pane_border_style = \"heavy\"\npane_border_style_active = \"double\"\n",
+                heavy_double,
+                vec![],
+            ),
+            (
+                "pane_border_style_inactive = \"rounded-dashed-2\"\n",
+                PaneBorderStyles {
+                    inactive: Some(PaneBorderStyle::RoundedDashed(
+                        crate::config::BorderDash::Two,
+                    )),
+                    ..PaneBorderStyles::default()
+                },
+                vec![],
+            ),
+            // A malformed override disables only itself; the rest of [ui] applies.
+            (
+                "pane_border_style = \"heavy\"\npane_border_style_active = \"thick\"\npane_scrollbars = false\n",
+                PaneBorderStyles {
+                    all: Some(PaneBorderStyle::Heavy),
+                    ..PaneBorderStyles::default()
+                },
+                vec![
+                    "ui.pane_border_style_active must be light, rounded, heavy, double, light-dashed-N, heavy-dashed-N or rounded-dashed-N with N from 2 to 4 (got \"thick\"); using pane_border_style".to_string(),
+                ],
+            ),
+            (
+                "pane_border_style = \"heavy\"\npane_border_style_active = \"double\"\n",
+                heavy_double,
+                vec![],
+            ),
+            ("", PaneBorderStyles::default(), vec![]),
+        ] {
+            std::fs::write(&path, format!("{base}{body}")).unwrap();
+            let report = app.reload_config();
+            let status = if diagnostics.is_empty() {
+                crate::config::ConfigReloadStatus::Applied
+            } else {
+                crate::config::ConfigReloadStatus::Partial
+            };
+            assert_eq!(report.status, status, "{body:?}");
+            assert_eq!(app.state.pane_border_styles, expected, "{body:?}");
+            assert_eq!(report.diagnostics, diagnostics, "{body:?}");
+            assert_eq!(
+                app.state.pane_scrollbars,
+                !body.contains("pane_scrollbars = false"),
+                "{body:?}"
+            );
+        }
 
         std::env::remove_var(crate::config::CONFIG_PATH_ENV_VAR);
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
