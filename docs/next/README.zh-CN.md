@@ -67,6 +67,8 @@ herdr
 
 在 `[ui]` 下用 `pane_title_tokens` 以与智能体侧边栏相同的样式化标记组成窗格边框标题，包括实时的 `$name` 窗格元数据。未设置时保持现有标题。参见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
 
+在 `[ui]` 下用 `pane_border_identity_token` 根据一个样式化标记为未获得焦点的窗格边框线着色，例如通过窗格元数据报告的 `$role`。获得焦点的窗格保持强调色，未设置时保持现有边框颜色。
+
 ## 文档
 
 所有文档都在 [herdr.dev/docs](https://herdr.dev/zh-cn/docs/)：[快速开始](https://herdr.dev/zh-cn/docs/quick-start/) · [核心概念](https://herdr.dev/zh-cn/docs/concepts/) · [受支持的智能体](https://herdr.dev/zh-cn/docs/agents/) · [键盘](https://herdr.dev/zh-cn/docs/keyboard/) · [配置](https://herdr.dev/zh-cn/docs/configuration/) · [会话状态](https://herdr.dev/zh-cn/docs/session-state/) · [连接机器](https://herdr.dev/zh-cn/docs/connecting-machines/) · [远程访问](https://herdr.dev/zh-cn/docs/persistence-remote/) · [集成](https://herdr.dev/zh-cn/docs/integrations/) · [为智能体添加 herdr 支持](https://herdr.dev/zh-cn/docs/add-herdr-support/) · [插件](https://herdr.dev/zh-cn/docs/plugins/) · [socket api](https://herdr.dev/zh-cn/docs/socket-api/)
