@@ -85,10 +85,10 @@ pub(crate) fn new_pane_terminal_size(
     placement: NewPanePlacement,
 ) -> (u16, u16) {
     let laid_out = |panes: Vec<PaneInfo>, index: usize| {
-        let infos = apply_pane_chrome(
+        let (infos, _) = apply_pane_spacing(
             panes,
             app.pane_borders,
-            app.pane_gaps,
+            app.pane_spacing(),
             app.pane_outer_borders,
         );
         pane_inner_rect(infos[index].rect, infos[index].borders)
@@ -133,12 +133,13 @@ pub(crate) fn new_layout_terminal_sizes(
     area: Rect,
     layout: &crate::layout::TileLayout,
 ) -> Vec<(u16, u16)> {
-    apply_pane_chrome(
+    apply_pane_spacing(
         layout.panes(area),
         app.pane_borders,
-        app.pane_gaps,
+        app.pane_spacing(),
         app.pane_outer_borders,
     )
+    .0
     .into_iter()
     .map(|info| new_terminal_size(app, pane_inner_rect(info.rect, info.borders)))
     .collect()
@@ -188,12 +189,106 @@ fn pane_below<'a>(info: &PaneInfo, panes: &'a [PaneInfo]) -> Option<&'a PaneInfo
     })
 }
 
-fn shrink_for_one_cell_gap(size: u16) -> u16 {
-    if size > 1 {
-        size - 1
+fn shrink_for_gap(size: u16, gap: u16) -> u16 {
+    if size > gap {
+        size - gap
     } else {
         size
     }
+}
+
+/// Configured inter-pane spacing: the legacy `ui.pane_gaps` boolean, or the
+/// `ui.pane_gap_cells` override when it is set.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PaneSpacing {
+    Legacy(bool),
+    Cells(u16),
+}
+
+/// Inter-pane spacing resolved for one tab layout. `separate` keeps each pane's
+/// own frame on edges shared with a neighbour; `blank` is the number of empty
+/// cells taken from the leading (left/top) pane at every internal boundary.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct PaneGaps {
+    pub(crate) separate: bool,
+    pub(crate) blank: u16,
+}
+
+impl PaneGaps {
+    pub(crate) fn legacy(pane_gaps: bool, draws_borders: bool) -> Self {
+        Self {
+            separate: pane_gaps,
+            blank: u16::from(pane_gaps && !draws_borders),
+        }
+    }
+
+    fn cells(cells: u16) -> Self {
+        Self {
+            separate: cells > 0,
+            blank: cells,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct PaneArea {
+    left: u16,
+    top: u16,
+    right: u16,
+    bottom: u16,
+}
+
+impl PaneArea {
+    fn of(panes: &[PaneInfo]) -> Self {
+        Self {
+            left: panes.iter().map(|info| info.rect.x).min().unwrap_or(0),
+            top: panes.iter().map(|info| info.rect.y).min().unwrap_or(0),
+            right: panes
+                .iter()
+                .map(|info| info.rect.x.saturating_add(info.rect.width))
+                .max()
+                .unwrap_or(0),
+            bottom: panes
+                .iter()
+                .map(|info| info.rect.y.saturating_add(info.rect.height))
+                .max()
+                .unwrap_or(0),
+        }
+    }
+}
+
+fn chrome_borders(
+    rect: Rect,
+    right_neighbor: bool,
+    below_neighbor: bool,
+    separate: bool,
+    pane_outer_borders: bool,
+    area: PaneArea,
+) -> Borders {
+    let mut borders = Borders::ALL;
+    if !separate {
+        if right_neighbor {
+            borders.remove(Borders::RIGHT);
+        }
+        if below_neighbor {
+            borders.remove(Borders::BOTTOM);
+        }
+    }
+    if !pane_outer_borders {
+        if rect.x == area.left {
+            borders.remove(Borders::LEFT);
+        }
+        if rect.y == area.top {
+            borders.remove(Borders::TOP);
+        }
+        if rect.x.saturating_add(rect.width) == area.right {
+            borders.remove(Borders::RIGHT);
+        }
+        if rect.y.saturating_add(rect.height) == area.bottom {
+            borders.remove(Borders::BOTTOM);
+        }
+    }
+    borders
 }
 
 pub(crate) fn apply_pane_chrome(
@@ -202,20 +297,88 @@ pub(crate) fn apply_pane_chrome(
     pane_gaps: bool,
     pane_outer_borders: bool,
 ) -> Vec<PaneInfo> {
+    let gaps = PaneGaps::legacy(pane_gaps, pane_borders.draws_borders());
+    apply_resolved_pane_chrome(panes, pane_borders, gaps, pane_outer_borders)
+}
+
+/// Applies pane frames and inter-pane spacing. Absent `pane_gap_cells` takes the
+/// legacy `pane_gaps` path; the returned gaps drive border merging and split hits.
+pub(crate) fn apply_pane_spacing(
+    panes: Vec<PaneInfo>,
+    pane_borders: crate::config::PaneBordersConfig,
+    spacing: PaneSpacing,
+    pane_outer_borders: bool,
+) -> (Vec<PaneInfo>, PaneGaps) {
+    let gaps = match spacing {
+        PaneSpacing::Legacy(pane_gaps) => {
+            return (
+                apply_pane_chrome(panes, pane_borders, pane_gaps, pane_outer_borders),
+                PaneGaps::legacy(pane_gaps, pane_borders.draws_borders()),
+            );
+        }
+        PaneSpacing::Cells(cells) => PaneGaps::cells(effective_gap_cells(
+            &panes,
+            pane_borders,
+            cells,
+            pane_outer_borders,
+        )),
+    };
+    (
+        apply_resolved_pane_chrome(panes, pane_borders, gaps, pane_outer_borders),
+        gaps,
+    )
+}
+
+/// Largest gap up to `cells` that still leaves one usable column (row) in every
+/// pane that gives up cells on that axis and has one in the shared-divider
+/// layout. Zero falls back to shared dividers, the baseline tiny layout.
+fn effective_gap_cells(
+    panes: &[PaneInfo],
+    pane_borders: crate::config::PaneBordersConfig,
+    cells: u16,
+    pane_outer_borders: bool,
+) -> u16 {
+    if cells == 0 || panes.len() < 2 {
+        return 0;
+    }
+    let bordered = pane_borders.shows_borders(true);
+    let area = PaneArea::of(panes);
+    let inner = |info: &PaneInfo, right: bool, below: bool, separate: bool| {
+        let borders = if bordered {
+            chrome_borders(info.rect, right, below, separate, pane_outer_borders, area)
+        } else {
+            Borders::NONE
+        };
+        pane_inner_rect(info.rect, borders)
+    };
+    let mut gap = cells;
+    for info in panes {
+        let right = pane_to_right(info, panes).is_some();
+        let below = pane_below(info, panes).is_some();
+        if !right && !below {
+            continue;
+        }
+        let shared = inner(info, right, below, false);
+        let separated = inner(info, right, below, true);
+        if right && shared.width > 0 {
+            gap = gap.min(separated.width.saturating_sub(1));
+        }
+        if below && shared.height > 0 {
+            gap = gap.min(separated.height.saturating_sub(1));
+        }
+    }
+    gap
+}
+
+fn apply_resolved_pane_chrome(
+    panes: Vec<PaneInfo>,
+    pane_borders: crate::config::PaneBordersConfig,
+    gaps: PaneGaps,
+    pane_outer_borders: bool,
+) -> Vec<PaneInfo> {
     let multi_pane = panes.len() > 1;
     let bordered = pane_borders.shows_borders(multi_pane);
-    let outer_left = panes.iter().map(|info| info.rect.x).min().unwrap_or(0);
-    let outer_top = panes.iter().map(|info| info.rect.y).min().unwrap_or(0);
-    let outer_right = panes
-        .iter()
-        .map(|info| info.rect.x.saturating_add(info.rect.width))
-        .max()
-        .unwrap_or(0);
-    let outer_bottom = panes
-        .iter()
-        .map(|info| info.rect.y.saturating_add(info.rect.height))
-        .max()
-        .unwrap_or(0);
+    let area = PaneArea::of(&panes);
     panes
         .iter()
         .cloned()
@@ -223,42 +386,26 @@ pub(crate) fn apply_pane_chrome(
             let right_neighbor = multi_pane.then(|| pane_to_right(&info, &panes)).flatten();
             let below_neighbor = multi_pane.then(|| pane_below(&info, &panes)).flatten();
 
-            if multi_pane && pane_gaps && !pane_borders.draws_borders() {
+            if multi_pane && gaps.blank > 0 {
                 if right_neighbor.is_some() {
-                    info.rect.width = shrink_for_one_cell_gap(info.rect.width);
+                    info.rect.width = shrink_for_gap(info.rect.width, gaps.blank);
                 }
                 if below_neighbor.is_some() {
-                    info.rect.height = shrink_for_one_cell_gap(info.rect.height);
+                    info.rect.height = shrink_for_gap(info.rect.height, gaps.blank);
                 }
             }
 
             info.borders = if !bordered {
                 Borders::NONE
             } else {
-                let mut borders = Borders::ALL;
-                if !pane_gaps {
-                    if right_neighbor.is_some() {
-                        borders.remove(Borders::RIGHT);
-                    }
-                    if below_neighbor.is_some() {
-                        borders.remove(Borders::BOTTOM);
-                    }
-                }
-                if !pane_outer_borders {
-                    if info.rect.x == outer_left {
-                        borders.remove(Borders::LEFT);
-                    }
-                    if info.rect.y == outer_top {
-                        borders.remove(Borders::TOP);
-                    }
-                    if info.rect.x.saturating_add(info.rect.width) == outer_right {
-                        borders.remove(Borders::RIGHT);
-                    }
-                    if info.rect.y.saturating_add(info.rect.height) == outer_bottom {
-                        borders.remove(Borders::BOTTOM);
-                    }
-                }
-                borders
+                chrome_borders(
+                    info.rect,
+                    right_neighbor.is_some(),
+                    below_neighbor.is_some(),
+                    gaps.separate,
+                    pane_outer_borders,
+                    area,
+                )
             };
             info
         })
@@ -341,12 +488,13 @@ pub(super) fn resize_tab_panes(
         return;
     }
 
-    for info in apply_pane_chrome(
+    let (pane_infos, _) = apply_pane_spacing(
         tab.layout.panes(area),
         app.pane_borders,
-        app.pane_gaps,
+        app.pane_spacing(),
         app.pane_outer_borders,
-    ) {
+    );
+    for info in pane_infos {
         let pane_inner = pane_inner_rect(info.rect, info.borders);
 
         if let Some((terminal_id, rt)) =
@@ -374,13 +522,13 @@ pub(super) fn compute_pane_infos_for_tab(
     area: Rect,
     resize_panes: bool,
     cell_size: crate::kitty_graphics::HostCellSize,
-) -> Vec<PaneInfo> {
+) -> (Vec<PaneInfo>, PaneGaps) {
     let Some(tab) = app
         .workspaces
         .get(ws_idx)
         .and_then(|workspace| workspace.tabs.get(tab_idx))
     else {
-        return Vec::new();
+        return (Vec::new(), PaneGaps::default());
     };
 
     let multi_pane = tab.layout.pane_count() > 1;
@@ -407,20 +555,21 @@ pub(super) fn compute_pane_infos_for_tab(
                 );
             }
         }
-        return vec![PaneInfo {
+        let zoomed = PaneInfo {
             id: focused_id,
             rect: area,
             inner_rect,
             scrollbar_rect,
             borders,
             is_focused: true,
-        }];
+        };
+        return (vec![zoomed], PaneGaps::default());
     }
 
-    let mut pane_infos = apply_pane_chrome(
+    let (mut pane_infos, pane_gaps) = apply_pane_spacing(
         tab.layout.panes(area),
         app.pane_borders,
-        app.pane_gaps,
+        app.pane_spacing(),
         app.pane_outer_borders,
     );
 
@@ -450,7 +599,7 @@ pub(super) fn compute_pane_infos_for_tab(
         info.scrollbar_rect = scrollbar_rect;
     }
 
-    pane_infos
+    (pane_infos, pane_gaps)
 }
 
 #[cfg(test)]
@@ -480,6 +629,7 @@ fn compute_pane_infos(
         resize_panes,
         cell_size,
     )
+    .0
 }
 
 pub(super) fn render_panes(
@@ -489,6 +639,7 @@ pub(super) fn render_panes(
     target: Option<super::tab_surface::TabSurfaceTarget>,
     pane_infos: &[PaneInfo],
     split_borders: &[crate::layout::SplitBorder],
+    pane_gaps: PaneGaps,
 ) {
     let Some(target) = target else {
         return;
@@ -519,7 +670,7 @@ pub(super) fn render_panes(
         }
     }
 
-    render_pane_borders(app, ws, pane_infos, split_borders, frame);
+    render_pane_borders(app, ws, pane_infos, split_borders, pane_gaps, frame);
 }
 
 pub(crate) fn popup_pane_rects(app: &AppState, area: Rect) -> Option<(Rect, Rect)> {
@@ -566,6 +717,7 @@ fn render_pane_borders(
     ws: &crate::workspace::Workspace,
     pane_infos: &[PaneInfo],
     split_borders: &[crate::layout::SplitBorder],
+    pane_gaps: PaneGaps,
     frame: &mut Frame,
 ) {
     if !app.pane_borders.draws_borders() || pane_infos.iter().all(|info| info.borders.is_empty()) {
@@ -576,7 +728,7 @@ fn render_pane_borders(
     for info in pane_infos {
         add_pane_border_cells(&mut cells, info);
     }
-    add_split_border_cells(app.pane_gaps, split_borders, &mut cells);
+    add_split_border_cells(pane_gaps.separate, split_borders, &mut cells);
     // All style keys unset keeps the stock glyph path below.
     let styles = app
         .pane_border_styles
@@ -586,7 +738,7 @@ fn render_pane_borders(
         pane_infos
             .iter()
             .find(|info| info.is_focused)
-            .and_then(|info| FocusFrame::of(info, app.pane_gaps))
+            .and_then(|info| FocusFrame::of(info, pane_gaps.separate))
     });
 
     let buf = frame.buffer_mut();
@@ -601,7 +753,7 @@ fn render_pane_borders(
         }
         let focused = pane_infos
             .iter()
-            .any(|info| info.is_focused && line_touches_pane(x, y, info, app.pane_gaps));
+            .any(|info| info.is_focused && line_touches_pane(x, y, info, pane_gaps.separate));
         let symbol = match styles {
             Some((active, inactive)) => {
                 let owned =
@@ -1300,7 +1452,15 @@ mod tests {
         split_borders: &[crate::layout::SplitBorder],
         frame: &mut Frame,
     ) {
-        render_pane_borders(app, ws, &app.view.pane_infos, split_borders, frame);
+        let pane_gaps = PaneGaps::legacy(app.pane_gaps, app.pane_borders.draws_borders());
+        render_pane_borders(
+            app,
+            ws,
+            &app.view.pane_infos,
+            split_borders,
+            pane_gaps,
+            frame,
+        );
     }
 
     #[test]
@@ -2204,10 +2364,10 @@ mod tests {
 
     fn render_layout_borders(app: &AppState, workspace: &Workspace, area: Rect) -> Buffer {
         let layout = &workspace.tabs[0].layout;
-        let infos = apply_pane_chrome(
+        let (infos, gaps) = apply_pane_spacing(
             layout.panes(area),
             app.pane_borders,
-            app.pane_gaps,
+            app.pane_spacing(),
             app.pane_outer_borders,
         );
         let splits = layout.splits(area);
@@ -2215,7 +2375,7 @@ mod tests {
             ratatui::Terminal::new(ratatui::backend::TestBackend::new(area.width, area.height))
                 .unwrap();
         terminal
-            .draw(|frame| render_pane_borders(app, workspace, &infos, &splits, frame))
+            .draw(|frame| render_pane_borders(app, workspace, &infos, &splits, gaps, frame))
             .unwrap();
         terminal.backend().buffer().clone()
     }
@@ -2735,6 +2895,46 @@ mod tests {
             layouts.push(workspace);
         }
         layouts
+    }
+
+    /// Pane border styles x S1: style ownership follows the resolved spacing, not the
+    /// legacy `pane_gaps` flag, so `pane_gap_cells = 0` beside `pane_gaps = true` draws
+    /// exactly the shared-divider glyphs and colors, for every focus position and every
+    /// active/inactive style mix (plus every all-panes style).
+    #[test]
+    fn pane_gap_cells_zero_weights_and_colors_like_shared_dividers() {
+        let area = Rect::new(0, 0, 12, 6);
+        let mut mixes = Vec::new();
+        for (_, all) in PaneBorderStyle::NAMES {
+            mixes.push(PaneBorderStyles {
+                all: Some(all),
+                active: None,
+                inactive: None,
+            });
+        }
+        for (_, active) in PaneBorderStyle::NAMES {
+            for (_, inactive) in PaneBorderStyle::NAMES {
+                mixes.push(PaneBorderStyles {
+                    all: None,
+                    active: Some(active),
+                    inactive: Some(inactive),
+                });
+            }
+        }
+        for workspace in matrix_layouts() {
+            for mix in &mixes {
+                let mut legacy = border_app(PaneBordersConfig::Auto, false, true);
+                legacy.pane_border_styles = *mix;
+                let mut zero = border_app(PaneBordersConfig::Auto, true, true);
+                zero.pane_gap_cells = Some(0);
+                zero.pane_border_styles = *mix;
+                assert_eq!(
+                    render_layout_borders(&zero, &workspace, area),
+                    render_layout_borders(&legacy, &workspace, area),
+                    "styles={mix:?}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -3641,5 +3841,304 @@ mod tests {
                 "{keys:?}"
             );
         }
+    }
+
+    /// `(A / D) | (B / C)`: two columns, each split into two rows.
+    fn grid_workspace() -> (Workspace, [PaneId; 4]) {
+        let mut workspace = Workspace::test_new("grid");
+        let a = workspace.tabs[0].root_pane;
+        let b = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        let c = workspace.test_split(ratatui::layout::Direction::Vertical);
+        workspace.tabs[0].layout.focus_pane(a);
+        let d = workspace.test_split(ratatui::layout::Direction::Vertical);
+        workspace.tabs[0].layout.focus_pane(a);
+        (workspace, [a, b, c, d])
+    }
+
+    fn spacing_app(
+        workspace: Workspace,
+        pane_borders: PaneBordersConfig,
+        pane_gaps: bool,
+        pane_gap_cells: Option<u16>,
+        pane_outer_borders: bool,
+    ) -> AppState {
+        let mut app = AppState::test_new();
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+        app.pane_borders = pane_borders;
+        app.pane_gaps = pane_gaps;
+        app.pane_gap_cells = pane_gap_cells;
+        app.pane_outer_borders = pane_outer_borders;
+        app
+    }
+
+    type PaneGeometry = Vec<(PaneId, Rect, Rect, Borders)>;
+
+    fn render_spacing(app: &AppState, area: Rect) -> (Buffer, PaneGeometry, PaneGaps) {
+        let runtimes = TerminalRuntimeRegistry::new();
+        let layout = crate::ui::compute_tab_surface_for(
+            app,
+            &runtimes,
+            Some(crate::ui::TabSurfaceTarget {
+                workspace_index: 0,
+                tab_index: 0,
+            }),
+            area,
+            false,
+            Default::default(),
+        );
+        let (buffer, _, _, layout) =
+            crate::server::render_stream::render_tab_surface_virtual(app, &runtimes, layout, area);
+        let geometry = layout
+            .pane_infos
+            .iter()
+            .map(|info| (info.id, info.rect, info.inner_rect, info.borders))
+            .collect();
+        (buffer, geometry, layout.pane_gaps)
+    }
+
+    fn rect_of(geometry: &PaneGeometry, id: PaneId) -> Rect {
+        geometry.iter().find(|pane| pane.0 == id).unwrap().1
+    }
+
+    /// Geometry without pane ids, for comparing two separately built workspaces.
+    fn strip(geometry: PaneGeometry) -> Vec<(Rect, Rect, Borders)> {
+        geometry
+            .into_iter()
+            .map(|(_, rect, inner, borders)| (rect, inner, borders))
+            .collect()
+    }
+
+    fn row_text(buffer: &Buffer, y: u16, xs: std::ops::Range<u16>) -> String {
+        xs.map(|x| buffer[(x, y)].symbol()).collect()
+    }
+
+    fn column_text(buffer: &Buffer, x: u16, ys: std::ops::Range<u16>) -> String {
+        ys.map(|y| buffer[(x, y)].symbol()).collect()
+    }
+
+    #[test]
+    fn absent_pane_gap_cells_runs_the_legacy_path() {
+        let area = Rect::new(0, 0, 80, 24);
+        for pane_borders in [PaneBordersConfig::Auto, PaneBordersConfig::Off] {
+            for pane_gaps in [true, false] {
+                for outer in [true, false] {
+                    let (workspace, _) = grid_workspace();
+                    let app = spacing_app(workspace, pane_borders, pane_gaps, None, outer);
+                    assert_eq!(app.pane_spacing(), PaneSpacing::Legacy(pane_gaps));
+                    let panes = app.workspaces[0].tabs[0].layout.panes(area);
+                    let legacy = apply_pane_chrome(panes.clone(), pane_borders, pane_gaps, outer);
+                    let (spaced, gaps) =
+                        apply_pane_spacing(panes, pane_borders, app.pane_spacing(), outer);
+                    assert_eq!(
+                        gaps,
+                        PaneGaps::legacy(pane_gaps, pane_borders.draws_borders())
+                    );
+                    let shape = |infos: &[PaneInfo]| {
+                        infos
+                            .iter()
+                            .map(|info| (info.id, info.rect, info.borders))
+                            .collect::<Vec<_>>()
+                    };
+                    assert_eq!(shape(&spaced), shape(&legacy));
+                }
+            }
+        }
+
+        // Legacy separated frames touch: no blank cell between them.
+        let (workspace, [a, b, ..]) = grid_workspace();
+        let app = spacing_app(workspace, PaneBordersConfig::Auto, true, None, true);
+        let (buffer, geometry, _) = render_spacing(&app, area);
+        let a_rect = rect_of(&geometry, a);
+        assert_eq!(a_rect.right(), rect_of(&geometry, b).x);
+        assert_eq!(
+            row_text(&buffer, 4, a_rect.right() - 1..a_rect.right() + 1),
+            "││"
+        );
+    }
+
+    #[test]
+    fn pane_gap_cells_zero_matches_legacy_shared_dividers() {
+        let area = Rect::new(0, 0, 80, 24);
+        for pane_borders in [PaneBordersConfig::Auto, PaneBordersConfig::Off] {
+            for outer in [true, false] {
+                let legacy = spacing_app(grid_workspace().0, pane_borders, false, None, outer);
+                // `pane_gaps = true` beside the override proves the override wins.
+                let zero = spacing_app(grid_workspace().0, pane_borders, true, Some(0), outer);
+                let (legacy_buffer, legacy_geometry, legacy_gaps) = render_spacing(&legacy, area);
+                let (zero_buffer, zero_geometry, zero_gaps) = render_spacing(&zero, area);
+                assert_eq!(zero_buffer, legacy_buffer, "{pane_borders:?} outer={outer}");
+                assert_eq!(zero_gaps, legacy_gaps);
+                assert_eq!(strip(zero_geometry), strip(legacy_geometry));
+            }
+        }
+    }
+
+    #[test]
+    fn pane_gap_cells_one_against_legacy_pane_gaps() {
+        let area = Rect::new(0, 0, 80, 24);
+
+        // Frames off: one blank cell taken from the leading pane in both forms.
+        let legacy = spacing_app(grid_workspace().0, PaneBordersConfig::Off, true, None, true);
+        let one = spacing_app(
+            grid_workspace().0,
+            PaneBordersConfig::Off,
+            false,
+            Some(1),
+            true,
+        );
+        let (legacy_buffer, legacy_geometry, legacy_gaps) = render_spacing(&legacy, area);
+        let (one_buffer, one_geometry, one_gaps) = render_spacing(&one, area);
+        assert_eq!(one_buffer, legacy_buffer);
+        assert_eq!(one_gaps, legacy_gaps);
+        assert_eq!(strip(one_geometry), strip(legacy_geometry));
+
+        // Frames on: legacy frames touch, one cell leaves a blank column/row between them.
+        let (workspace, [legacy_a, ..]) = grid_workspace();
+        let legacy = spacing_app(workspace, PaneBordersConfig::Auto, true, None, true);
+        let (workspace, [a, b, c, d]) = grid_workspace();
+        let one = spacing_app(workspace, PaneBordersConfig::Auto, false, Some(1), true);
+        let (legacy_buffer, legacy_geometry, _) = render_spacing(&legacy, area);
+        let (one_buffer, one_geometry, one_gaps) = render_spacing(&one, area);
+        assert_eq!(
+            one_gaps,
+            PaneGaps {
+                separate: true,
+                blank: 1
+            }
+        );
+        assert_eq!(rect_of(&legacy_geometry, legacy_a), Rect::new(0, 0, 40, 12));
+        assert_eq!(rect_of(&one_geometry, a), Rect::new(0, 0, 39, 11));
+        assert_eq!(rect_of(&one_geometry, b), Rect::new(40, 0, 40, 11));
+        assert_eq!(rect_of(&one_geometry, d), Rect::new(0, 12, 39, 12));
+        // The trailing pane of both boundaries keeps its baseline rect.
+        assert_eq!(rect_of(&one_geometry, c), Rect::new(40, 12, 40, 12));
+        assert_eq!(row_text(&legacy_buffer, 4, 39..41), "││");
+        assert_eq!(row_text(&one_buffer, 4, 38..41), "│ │");
+        assert_eq!(column_text(&legacy_buffer, 4, 11..13), "──");
+        assert_eq!(column_text(&one_buffer, 4, 10..13), "─ ─");
+        assert_ne!(one_buffer, legacy_buffer);
+    }
+
+    #[test]
+    fn pane_gap_cells_leave_n_blank_cells_between_frames() {
+        let area = Rect::new(0, 0, 80, 24);
+        let (workspace, [a, b, c, d]) = grid_workspace();
+        let app = spacing_app(workspace, PaneBordersConfig::Auto, true, Some(3), true);
+        let (buffer, geometry, gaps) = render_spacing(&app, area);
+
+        assert_eq!(
+            gaps,
+            PaneGaps {
+                separate: true,
+                blank: 3
+            }
+        );
+        // Baseline split rounding is kept; the leading pane of each boundary gives up N cells.
+        assert_eq!(rect_of(&geometry, a), Rect::new(0, 0, 37, 9));
+        assert_eq!(rect_of(&geometry, d), Rect::new(0, 12, 37, 12));
+        assert_eq!(rect_of(&geometry, b), Rect::new(40, 0, 40, 9));
+        assert_eq!(rect_of(&geometry, c), Rect::new(40, 12, 40, 12));
+        for (_, rect, inner, borders) in &geometry {
+            assert_eq!(*borders, Borders::ALL);
+            assert_eq!(*inner, pane_inner_rect(*rect, Borders::ALL));
+        }
+
+        // N blank cells between opposing frame edges, both frames kept.
+        assert_eq!(row_text(&buffer, 4, 36..41), "│   │");
+        assert_eq!(row_text(&buffer, 15, 36..41), "│   │");
+        assert_eq!(column_text(&buffer, 4, 8..13), "─   ─");
+        assert_eq!(column_text(&buffer, 60, 8..13), "─   ─");
+        assert_eq!(row_text(&buffer, 10, 0..80).trim(), "");
+        // No outer margin: the outer frame still sits on the area edge.
+        assert_eq!(buffer[(0, 0)].symbol(), "┌");
+        assert_eq!(buffer[(79, 0)].symbol(), "┐");
+        assert_eq!(buffer[(0, 23)].symbol(), "└");
+        assert_eq!(buffer[(79, 23)].symbol(), "┘");
+    }
+
+    #[test]
+    fn pane_gap_cells_without_frames_leave_n_blank_cells() {
+        let area = Rect::new(0, 0, 80, 24);
+        let (workspace, [a, b, c, d]) = grid_workspace();
+        let app = spacing_app(workspace, PaneBordersConfig::Off, false, Some(3), true);
+        let (buffer, geometry, gaps) = render_spacing(&app, area);
+
+        assert_eq!(gaps.blank, 3);
+        assert_eq!(rect_of(&geometry, a), Rect::new(0, 0, 37, 9));
+        assert_eq!(rect_of(&geometry, d), Rect::new(0, 12, 37, 12));
+        assert_eq!(rect_of(&geometry, b), Rect::new(40, 0, 40, 9));
+        assert_eq!(rect_of(&geometry, c), Rect::new(40, 12, 40, 12));
+        for (_, rect, inner, borders) in &geometry {
+            assert!(borders.is_empty());
+            assert_eq!(inner, rect);
+        }
+        assert!(buffer.content.iter().all(|cell| cell.symbol() == " "));
+    }
+
+    #[test]
+    fn pane_gap_cells_shrink_only_as_needed_in_small_areas() {
+        let two_columns = || {
+            let mut workspace = Workspace::test_new("small");
+            let left = workspace.tabs[0].root_pane;
+            workspace.test_split(ratatui::layout::Direction::Horizontal);
+            workspace.tabs[0].layout.focus_pane(left);
+            (workspace, left)
+        };
+        let (workspace, left) = two_columns();
+        let app = spacing_app(workspace, PaneBordersConfig::Auto, true, Some(10), true);
+        let shared = spacing_app(two_columns().0, PaneBordersConfig::Auto, false, None, true);
+
+        // 20 columns: the leading pane keeps exactly one usable column.
+        let (_, geometry, gaps) = render_spacing(&app, Rect::new(0, 0, 20, 8));
+        assert_eq!(gaps.blank, 7);
+        let inner = geometry.iter().find(|pane| pane.0 == left).unwrap().2;
+        assert_eq!(inner.width, 1);
+
+        // 4 columns: no gap fits, so the shared-divider baseline is used unchanged.
+        let tiny = Rect::new(0, 0, 4, 8);
+        let (tiny_buffer, tiny_geometry, tiny_gaps) = render_spacing(&app, tiny);
+        let (shared_buffer, shared_geometry, shared_gaps) = render_spacing(&shared, tiny);
+        assert_eq!(tiny_gaps, shared_gaps);
+        assert_eq!(tiny_buffer, shared_buffer);
+        assert_eq!(strip(tiny_geometry), strip(shared_geometry));
+
+        // 2 columns: panes already unusable at baseline do not force the fallback,
+        // and no rect leaves the area or wraps.
+        let degenerate = Rect::new(0, 0, 2, 8);
+        let (_, geometry, _) = render_spacing(&app, degenerate);
+        for (_, rect, inner, _) in &geometry {
+            assert!(rect.right() <= degenerate.right() && rect.bottom() <= degenerate.bottom());
+            assert!(inner.width <= rect.width && inner.height <= rect.height);
+        }
+
+        // Re-expanding restores the original layout; N stays configured throughout.
+        let area = Rect::new(0, 0, 80, 24);
+        let (before_buffer, before, _) = render_spacing(&app, area);
+        render_spacing(&app, tiny);
+        let (after_buffer, after, after_gaps) = render_spacing(&app, area);
+        assert_eq!(after, before);
+        assert_eq!(after_buffer, before_buffer);
+        assert_eq!(after_gaps.blank, 10);
+        assert_eq!(app.pane_gap_cells, Some(10));
+    }
+
+    #[test]
+    fn pane_gap_cells_do_not_apply_to_a_zoomed_tab() {
+        let area = Rect::new(0, 0, 80, 24);
+        let zoomed = || {
+            let (mut workspace, [a, ..]) = grid_workspace();
+            workspace.tabs[0].zoomed = true;
+            (workspace, a)
+        };
+        let (workspace, a) = zoomed();
+        let spaced = spacing_app(workspace, PaneBordersConfig::Auto, true, Some(5), true);
+        let legacy = spacing_app(zoomed().0, PaneBordersConfig::Auto, true, None, true);
+        let (spaced_buffer, spaced_geometry, _) = render_spacing(&spaced, area);
+        let (legacy_buffer, legacy_geometry, _) = render_spacing(&legacy, area);
+        assert_eq!(spaced_buffer, legacy_buffer);
+        assert_eq!(spaced_geometry.len(), 1);
+        assert_eq!(rect_of(&spaced_geometry, a), area);
+        assert_eq!(strip(spaced_geometry), strip(legacy_geometry));
     }
 }

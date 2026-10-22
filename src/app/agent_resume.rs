@@ -150,7 +150,7 @@ impl App {
             tab,
             terminal_area,
             self.state.pane_borders,
-            self.state.pane_gaps,
+            self.state.pane_spacing(),
             self.state.pane_outer_borders,
         );
 
@@ -322,15 +322,16 @@ fn derived_pending_agent_resume_pane_infos(
     tab: &crate::workspace::Tab,
     terminal_area: Rect,
     pane_borders: crate::config::PaneBordersConfig,
-    pane_gaps: bool,
+    pane_spacing: crate::ui::PaneSpacing,
     pane_outer_borders: bool,
 ) -> Vec<crate::layout::PaneInfo> {
-    crate::ui::apply_pane_chrome(
+    crate::ui::apply_pane_spacing(
         tab.layout.panes(terminal_area),
         pane_borders,
-        pane_gaps,
+        pane_spacing,
         pane_outer_borders,
     )
+    .0
     .into_iter()
     .map(|mut info| {
         let pane_inner = crate::ui::pane_inner_rect(info.rect, info.borders);
@@ -951,6 +952,53 @@ mod tests {
         for (_, runtime) in app.terminal_runtimes.drain() {
             runtime.shutdown();
         }
+    }
+
+    #[test]
+    fn pending_resume_geometry_uses_pane_gap_cells() {
+        let mut workspace = crate::workspace::Workspace::test_new("resume");
+        let left = workspace.tabs[0].root_pane;
+        let right = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        let area = Rect::new(0, 0, 80, 24);
+        let rects = |spacing| {
+            derived_pending_agent_resume_pane_infos(
+                &workspace.tabs[0],
+                area,
+                crate::config::PaneBordersConfig::Auto,
+                spacing,
+                true,
+            )
+            .into_iter()
+            .map(|info| (info.id, info.rect, info.inner_rect))
+            .collect::<Vec<_>>()
+        };
+
+        let spaced = rects(crate::ui::PaneSpacing::Cells(3));
+        let expected = crate::ui::apply_pane_spacing(
+            workspace.tabs[0].layout.panes(area),
+            crate::config::PaneBordersConfig::Auto,
+            crate::ui::PaneSpacing::Cells(3),
+            true,
+        )
+        .0;
+        for (id, rect, inner) in &spaced {
+            let visible = expected.iter().find(|info| info.id == *id).unwrap();
+            assert_eq!(*rect, visible.rect);
+            assert_eq!(
+                *inner,
+                stable_terminal_inner_rect(crate::ui::pane_inner_rect(
+                    rect.to_owned(),
+                    visible.borders
+                ))
+            );
+        }
+        let rect_of = |rects: &[(crate::layout::PaneId, Rect, Rect)], id| {
+            rects.iter().find(|pane| pane.0 == id).unwrap().1
+        };
+        assert_eq!(rect_of(&spaced, left), Rect::new(0, 0, 37, 24));
+        assert_eq!(rect_of(&spaced, right), Rect::new(40, 0, 40, 24));
+        let legacy = rects(crate::ui::PaneSpacing::Legacy(true));
+        assert_eq!(rect_of(&legacy, left), Rect::new(0, 0, 40, 24));
     }
 
     #[test]
