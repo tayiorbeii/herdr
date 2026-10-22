@@ -5,6 +5,51 @@ use ratatui::{
 
 use crate::app::state::Palette;
 
+pub(crate) fn interface_border_type(rounded: bool) -> ratatui::widgets::BorderType {
+    if rounded {
+        ratatui::widgets::BorderType::Rounded
+    } else {
+        ratatui::widgets::BorderType::Plain
+    }
+}
+
+pub(crate) fn rounded_light_corner(symbol: &str) -> Option<&'static str> {
+    match symbol {
+        "┌" => Some("╭"),
+        "┐" => Some("╮"),
+        "└" => Some("╰"),
+        "┘" => Some("╯"),
+        _ => None,
+    }
+}
+
+/// Restyle only an existing frame's four corners, never its contents or geometry.
+pub(crate) fn round_buffer_corners(buffer: &mut ratatui::buffer::Buffer, area: Rect) {
+    if area.width < 2 || area.height < 2 {
+        return;
+    }
+    let right = area.right().saturating_sub(1);
+    let bottom = area.bottom().saturating_sub(1);
+    for (x, y) in [
+        (area.x, area.y),
+        (right, area.y),
+        (area.x, bottom),
+        (right, bottom),
+    ] {
+        if x < buffer.area.x
+            || y < buffer.area.y
+            || x >= buffer.area.right()
+            || y >= buffer.area.bottom()
+        {
+            continue;
+        }
+        let cell = &mut buffer[(x, y)];
+        if let Some(symbol) = rounded_light_corner(cell.symbol()) {
+            cell.set_symbol(symbol);
+        }
+    }
+}
+
 pub(super) fn panel_contrast_fg(palette: &Palette) -> Color {
     match palette.panel_bg {
         Color::Reset => palette.surface_dim,
@@ -106,4 +151,64 @@ pub(crate) fn continue_button_rect(area: Rect) -> Rect {
         action_button_width(Some("↵"), "continue"),
         1,
     )
+}
+
+#[cfg(test)]
+mod border_tests {
+    use super::*;
+    use ratatui::{
+        buffer::Buffer,
+        style::{Modifier, Style},
+        widgets::{Block, Borders, Widget},
+    };
+
+    #[test]
+    fn rounded_borders_procedural_frame_preserves_every_other_cell() {
+        let area = Rect::new(3, 2, 6, 4);
+        let mut buffer = Buffer::empty(Rect::new(1, 1, 12, 7));
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Red).add_modifier(Modifier::BOLD))
+            .render(area, &mut buffer);
+        buffer[(4, 3)].set_symbol("┌");
+        let before = buffer.clone();
+        round_buffer_corners(&mut buffer, area);
+        for y in buffer.area.y..buffer.area.bottom() {
+            for x in buffer.area.x..buffer.area.right() {
+                let mut expected = before[(x, y)].clone();
+                if [(3, 2), (8, 2), (3, 5), (8, 5)].contains(&(x, y)) {
+                    expected.set_symbol(rounded_light_corner(expected.symbol()).unwrap());
+                }
+                assert_eq!(buffer[(x, y)], expected);
+            }
+        }
+        assert_eq!(
+            interface_border_type(false),
+            ratatui::widgets::BorderType::Plain
+        );
+        assert_eq!(
+            interface_border_type(true),
+            ratatui::widgets::BorderType::Rounded
+        );
+    }
+
+    #[test]
+    fn rounded_borders_helper_preserves_weight_junctions_existing_arcs_and_tiny_area() {
+        for glyph in ["─", "│", "┼", "┬", "┤", "╔", "┏", "╭", " "] {
+            assert_eq!(rounded_light_corner(glyph), None);
+            let mut buffer = Buffer::empty(Rect::new(0, 0, 2, 2));
+            buffer[(0, 0)].set_symbol(glyph);
+            let before = buffer.clone();
+            round_buffer_corners(&mut buffer, Rect::new(0, 0, 2, 2));
+            assert_eq!(buffer, before);
+        }
+        let mut buffer = Buffer::empty(Rect::new(3, 3, 1, 1));
+        buffer[(3, 3)].set_symbol("┌");
+        let before = buffer.clone();
+        let area = buffer.area;
+        round_buffer_corners(&mut buffer, area);
+        assert_eq!(buffer, before);
+        round_buffer_corners(&mut buffer, Rect::new(0, 0, 2, 2));
+        assert_eq!(buffer, before);
+    }
 }
