@@ -851,6 +851,91 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn layout_apply_starts_every_pane_at_its_size_inside_gap_cells_and_padding() {
+        let mut app = app_with_workspace();
+        app.state.pane_gap_cells = Some(2);
+        app.state.pane_padding_cells = 1;
+        let area = ratatui::layout::Rect::new(0, 0, 120, 40);
+        crate::ui::compute_view_without_resizing_panes(
+            &mut app.state,
+            &app.terminal_runtimes,
+            area,
+        );
+        let pane = || {
+            Box::new(LayoutNode::Pane {
+                pane: LayoutPane::default(),
+            })
+        };
+        let split = |direction, ratio, first, second| {
+            Box::new(LayoutNode::Split {
+                direction,
+                ratio,
+                first,
+                second,
+            })
+        };
+        let root = split(
+            SplitDirection::Right,
+            0.6,
+            split(SplitDirection::Down, 0.3, pane(), pane()),
+            split(SplitDirection::Right, 0.5, pane(), pane()),
+        );
+
+        // Gap cells and padding must both shrink the estimate, or the spawn size
+        // would only match the first relayout by accident.
+        let expected = app.state.new_layout_pane_sizes(&final_tile_layout(&root));
+        let (gap_cells, padding) = (app.state.pane_gap_cells, app.state.pane_padding_cells);
+        app.state.pane_gap_cells = None;
+        let without_gap = app.state.new_layout_pane_sizes(&final_tile_layout(&root));
+        app.state.pane_gap_cells = gap_cells;
+        app.state.pane_padding_cells = 0;
+        let without_padding = app.state.new_layout_pane_sizes(&final_tile_layout(&root));
+        app.state.pane_padding_cells = padding;
+        assert_ne!(expected, without_gap);
+        assert_ne!(expected, without_padding);
+
+        let response = app.handle_layout_apply(
+            "req".into(),
+            LayoutApplyParams {
+                workspace_id: None,
+                tab_id: None,
+                tab_label: None,
+                focus: false,
+                root: *root,
+            },
+        );
+
+        let _: SuccessResponse = serde_json::from_str(&response).unwrap();
+        let tab_idx = app.state.workspaces[0].tabs.len() - 1;
+        assert_ne!(app.state.workspaces[0].active_tab_index(), tab_idx);
+        let sizes = |app: &App| {
+            app.state.workspaces[0].tabs[tab_idx]
+                .layout
+                .pane_ids()
+                .into_iter()
+                .map(|pane_id| {
+                    app.state
+                        .runtime_for_pane_in_workspace(&app.terminal_runtimes, 0, pane_id)
+                        .unwrap()
+                        .current_size()
+                })
+                .collect::<Vec<_>>()
+        };
+        let spawned = sizes(&app);
+        assert_eq!(spawned, expected);
+        crate::ui::resize_tab_surface(
+            &app.state,
+            &app.terminal_runtimes,
+            0,
+            tab_idx,
+            area,
+            crate::kitty_graphics::HostCellSize::default(),
+        );
+        assert_eq!(sizes(&app), spawned);
+        shutdown_test_runtimes(&mut app);
+    }
+
+    #[tokio::test]
     async fn layout_apply_replaces_tab_with_requested_tree() {
         let mut app = app_with_workspace();
         let original_tab_id = app.public_tab_id(0, 0).unwrap();
