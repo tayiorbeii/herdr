@@ -97,15 +97,36 @@ fn retained_scrollbar_patch(
     alternate_screen_active: bool,
     metrics: Option<crate::pane::ScrollMetrics>,
 ) -> Option<Vec<protocol::PaneSurfacePatchRow>> {
+    // Pane padding separates terminal content from the scrollbar lane, so
+    // `inner_rect` no longer locates the lane. Reuse the lane the complete
+    // renderer published. When it published none while scrollback already
+    // existed, the pane reserves no gutter. Otherwise the complete renderer
+    // must place the new lane.
+    let padded = app.state.pane_padding_cells > 0;
+    if padded
+        && pane.scrollbar_rect.is_none()
+        && metrics.is_some_and(|metrics| metrics.max_offset_from_bottom > 0)
+        && app.state.pane_scrollbars
+        && !alternate_screen_active
+        && pane
+            .scroll
+            .is_none_or(|scroll| scroll.max_offset_from_bottom == 0)
+    {
+        return None;
+    }
     let next_rect = metrics
         .filter(|metrics| metrics.max_offset_from_bottom > 0)
         .filter(|_| app.state.pane_scrollbars && !alternate_screen_active)
         .and_then(|_| {
-            let rect = protocol::SurfaceRect {
-                x: pane.inner_rect.x.checked_add(pane.inner_rect.width)?,
-                y: pane.inner_rect.y,
-                width: 1,
-                height: pane.inner_rect.height,
+            let rect = if padded {
+                pane.scrollbar_rect?
+            } else {
+                protocol::SurfaceRect {
+                    x: pane.inner_rect.x.checked_add(pane.inner_rect.width)?,
+                    y: pane.inner_rect.y,
+                    width: 1,
+                    height: pane.inner_rect.height,
+                }
             };
             (rect_fits_frame(rect, frame)
                 && rect.x >= pane.rect.x
