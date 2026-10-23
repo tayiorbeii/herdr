@@ -253,6 +253,7 @@ mod copy;
 mod endpoint_requests;
 mod endpoints;
 mod graphics;
+mod inactive_dim;
 mod inactive_pane_bg;
 mod input_conformance;
 #[path = "input.rs"]
