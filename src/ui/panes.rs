@@ -83,8 +83,6 @@ fn row_uses(row: &[AgentSidebarToken], token: AgentSidebarToken) -> bool {
     row.iter().any(|configured| *configured.parts().0 == token)
 }
 
-// Resolves the configured row with the sidebar resolver against server-side pane data.
-// Status and machine tokens are client presentation, so they resolve as missing here.
 fn composed_pane_border_title(
     app: &AppState,
     ws: &crate::workspace::Workspace,
@@ -95,6 +93,25 @@ fn composed_pane_border_title(
     if info.rect.width <= 4 {
         return None;
     }
+    let resolved = resolve_pane_tokens(app, ws, info, terminal, row);
+    compose_title_spans(
+        &resolved,
+        pane_border_title_base_style(&app.palette, info.is_focused),
+        info.is_focused,
+        info.rect.width.saturating_sub(4) as usize,
+    )
+}
+
+// Resolves a configured row with the sidebar resolver against server-side pane data and keeps
+// tokens with visible text. Status and machine tokens are client presentation, so they resolve
+// as missing here.
+fn resolve_pane_tokens(
+    app: &AppState,
+    ws: &crate::workspace::Workspace,
+    info: &PaneInfo,
+    terminal: &crate::terminal::TerminalState,
+    row: &[AgentSidebarToken],
+) -> Vec<ResolvedToken> {
     let workspace = if row_uses(row, AgentSidebarToken::Workspace) {
         ws.display_name_from_terminals(&app.terminals)
     } else {
@@ -132,7 +149,7 @@ fn composed_pane_border_title(
         canonical_agent: None,
         tokens: &terminal.metadata_tokens,
     };
-    let resolved = sidebar_agent_row(row, &context, "")
+    sidebar_agent_row(row, &context, "")
         .into_iter()
         .filter(|token| {
             token
@@ -140,13 +157,147 @@ fn composed_pane_border_title(
                 .text_value()
                 .is_some_and(|text| !text.trim().is_empty())
         })
-        .collect::<Vec<_>>();
-    compose_title_spans(
-        &resolved,
-        pane_border_title_base_style(&app.palette, info.is_focused),
-        info.is_focused,
-        info.rect.width.saturating_sub(4) as usize,
-    )
+        .collect()
+}
+
+// Unfocused pane frame colour. Every inactive line fallback goes through here:
+// FC1's `pane_border_inactive` when set, else overlay0.
+fn pane_border_inactive_color(palette: &Palette) -> Color {
+    palette.pane_border_inactive.unwrap_or(palette.overlay0)
+}
+
+// Focused pane frame colour: FC1's `pane_border_active` when set, else accent.
+fn pane_border_active_color(palette: &Palette) -> Color {
+    palette.pane_border_active.unwrap_or(palette.accent)
+}
+
+// An unfocused pane's identity line colour: the configured token's explicit fg when the token
+// resolves to visible text. Focused panes skip resolution because focus owns their cells.
+fn pane_border_identity_color(
+    app: &AppState,
+    ws: &crate::workspace::Workspace,
+    info: &PaneInfo,
+    token: &AgentSidebarToken,
+) -> Option<Color> {
+    if info.is_focused {
+        return None;
+    }
+    let terminal = ws
+        .pane_state(info.id)
+        .and_then(|pane| app.terminals.get(&pane.attached_terminal_id))?;
+    resolve_pane_tokens(app, ws, info, terminal, std::slice::from_ref(token))
+        .first()?
+        .style
+        .fg
+        .map(|fg| fg.ratatui())
+}
+
+// The colour rule over one cell's owners (the panes `line_touches_pane` accepts): any focused
+// owner wins with the active colour; otherwise the cell takes an identity colour only when every
+// owner has one and they agree, else the inactive fallback. The fold is order-independent and
+// idempotent, so each owner may be added in any order and more than once.
+#[derive(Clone, Copy, Default)]
+struct LineOwners {
+    focused: bool,
+    neutral: bool,
+    agreed: Option<Color>,
+}
+
+impl LineOwners {
+    fn add(&mut self, focused: bool, identity: Option<Color>) {
+        if focused {
+            self.focused = true;
+            return;
+        }
+        match (identity, self.agreed) {
+            (Some(color), Some(agreed)) if color != agreed => self.neutral = true,
+            (Some(color), _) => self.agreed = Some(color),
+            (None, _) => self.neutral = true,
+        }
+    }
+
+    fn color(self, palette: &Palette) -> Color {
+        if self.focused {
+            return pane_border_active_color(palette);
+        }
+        match self.agreed {
+            Some(color) if !self.neutral => color,
+            _ => pane_border_inactive_color(palette),
+        }
+    }
+}
+
+// Per-cell owner folds for one render, built from each pane's `line_touch_cells` so the line
+// colour is a constant-time lookup instead of a walk over every pane per border cell.
+struct BorderLineOwners {
+    area: Rect,
+    cells: Vec<LineOwners>,
+}
+
+impl BorderLineOwners {
+    fn new(
+        area: Rect,
+        pane_infos: &[PaneInfo],
+        identities: &[Option<Color>],
+        pane_gaps: bool,
+    ) -> Self {
+        let mut cells =
+            vec![LineOwners::default(); usize::from(area.width) * usize::from(area.height)];
+        for (info, identity) in pane_infos.iter().zip(identities) {
+            line_touch_cells(info, pane_gaps, |x, y| {
+                if let Some(index) = Self::index(area, x, y) {
+                    cells[index].add(info.is_focused, *identity);
+                }
+            });
+        }
+        Self { area, cells }
+    }
+
+    fn index(area: Rect, x: u16, y: u16) -> Option<usize> {
+        let column = x
+            .checked_sub(area.x)
+            .filter(|column| *column < area.width)?;
+        let row = y.checked_sub(area.y).filter(|row| *row < area.height)?;
+        Some(usize::from(row) * usize::from(area.width) + usize::from(column))
+    }
+
+    fn line_color(&self, palette: &Palette, x: u16, y: u16) -> Color {
+        Self::index(self.area, x, y)
+            .map_or_else(LineOwners::default, |index| self.cells[index])
+            .color(palette)
+    }
+}
+
+// The previous per-cell walk over every pane, kept as the oracle for `BorderLineOwners`.
+#[cfg(test)]
+fn identity_line_color(
+    palette: &Palette,
+    pane_infos: &[PaneInfo],
+    identities: &[Option<Color>],
+    x: u16,
+    y: u16,
+    pane_gaps: bool,
+) -> Color {
+    let mut agreed = None;
+    let mut neutral = false;
+    for (info, identity) in pane_infos.iter().zip(identities) {
+        if !line_touches_pane(x, y, info, pane_gaps) {
+            continue;
+        }
+        if info.is_focused {
+            return pane_border_active_color(palette);
+        }
+        // Keep walking after a disagreement: a later owner may still be focused.
+        match (*identity, agreed) {
+            (Some(color), Some(agreed)) if color != agreed => neutral = true,
+            (Some(color), _) => agreed = Some(color),
+            (None, _) => neutral = true,
+        }
+    }
+    match agreed {
+        Some(color) if !neutral => color,
+        _ => pane_border_inactive_color(palette),
+    }
 }
 
 fn compose_title_spans(
@@ -968,8 +1119,18 @@ fn render_pane_borders(
             .and_then(|info| FocusFrame::of(info, pane_gaps.separate))
     });
 
+    // Resolved once per pane per render; absent config keeps the plain focus/inactive choice.
+    let identities = app.pane_border_identity_token.as_ref().map(|token| {
+        pane_infos
+            .iter()
+            .map(|info| pane_border_identity_color(app, ws, info, token))
+            .collect::<Vec<_>>()
+    });
     let buf = frame.buffer_mut();
     let area = buf.area;
+    let owners = identities
+        .as_deref()
+        .map(|identities| BorderLineOwners::new(area, pane_infos, identities, pane_gaps.separate));
     for ((x, y), line) in cells {
         if x < area.x
             || x >= area.x.saturating_add(area.width)
@@ -978,9 +1139,6 @@ fn render_pane_borders(
         {
             continue;
         }
-        let focused = pane_infos
-            .iter()
-            .any(|info| info.is_focused && line_touches_pane(x, y, info, pane_gaps.separate));
         let symbol = match styles {
             Some((active, inactive)) => {
                 let owned =
@@ -992,9 +1150,18 @@ fn render_pane_borders(
         if symbol.is_empty() {
             continue;
         }
+        let color = match &owners {
+            Some(owners) => owners.line_color(&app.palette, x, y),
+            None => {
+                let focused = pane_infos.iter().any(|info| {
+                    info.is_focused && line_touches_pane(x, y, info, pane_gaps.separate)
+                });
+                pane_border_color(&app.palette, focused)
+            }
+        };
         let cell = &mut buf[(x, y)];
         cell.set_symbol(symbol);
-        cell.set_style(Style::default().fg(pane_border_color(&app.palette, focused)));
+        cell.set_style(Style::default().fg(color));
     }
 
     render_pane_border_titles(app, ws, pane_infos, frame);
@@ -1003,9 +1170,9 @@ fn render_pane_borders(
 /// Pane frame and title focus color; absent overrides follow accent / overlay0.
 fn pane_border_color(palette: &Palette, focused: bool) -> Color {
     if focused {
-        palette.pane_border_active.unwrap_or(palette.accent)
+        pane_border_active_color(palette)
     } else {
-        palette.pane_border_inactive.unwrap_or(palette.overlay0)
+        pane_border_inactive_color(palette)
     }
 }
 
@@ -1129,6 +1296,39 @@ fn line_touches_pane(x: u16, y: u16, info: &PaneInfo, pane_gaps: bool) -> bool {
         || (in_rows && x == shared_right)
         || (in_cols && y == shared_bottom)
         || (x == shared_right && y == shared_bottom)
+}
+
+// Visits every cell `line_touches_pane` accepts for this pane, some more than once:
+// its own perimeter and, without gaps, the shared column to its right, the shared row
+// below and their corner.
+fn line_touch_cells(info: &PaneInfo, pane_gaps: bool, mut visit: impl FnMut(u16, u16)) {
+    let rect = info.rect;
+    if rect.width == 0 || rect.height == 0 {
+        return;
+    }
+    let right = rect.x.saturating_add(rect.width).saturating_sub(1);
+    let bottom = rect.y.saturating_add(rect.height).saturating_sub(1);
+    for x in rect.x..=right {
+        visit(x, rect.y);
+        visit(x, bottom);
+    }
+    for y in rect.y..=bottom {
+        visit(rect.x, y);
+        visit(right, y);
+    }
+    if pane_gaps {
+        return;
+    }
+
+    let shared_right = rect.x.saturating_add(rect.width);
+    let shared_bottom = rect.y.saturating_add(rect.height);
+    for y in rect.y..=bottom {
+        visit(shared_right, y);
+    }
+    for x in rect.x..=right {
+        visit(x, shared_bottom);
+    }
+    visit(shared_right, shared_bottom);
 }
 
 fn render_pane_border_titles(
@@ -5130,5 +5330,728 @@ mod tests {
         let buffer = render_title_tab(&app, area);
         assert_eq!(buffer[(0, 0)].symbol(), "┌");
         assert_eq!(row_text(&buffer, 0, 1..9), " zoomed ");
+    }
+
+    const BUILD_FG: Color = Color::Rgb(0xa6, 0xe3, 0xa1);
+    const REVIEW_FG: Color = Color::Rgb(0xf9, 0xe2, 0xaf);
+
+    fn identity_token(token: &str) -> AgentSidebarToken {
+        title_row(&format!("[{token}]")).remove(0)
+    }
+
+    fn role_identity_token() -> AgentSidebarToken {
+        identity_token(
+            r##"{ token = "$role", rules = [{ equals = "build", fg = "#a6e3a1" }, { equals = "review", fg = "#f9e2af" }] }"##,
+        )
+    }
+
+    // Left pane `root` (focused) | right column split into `top` over `bottom`.
+    fn identity_test_app() -> (AppState, [PaneId; 3]) {
+        let mut app = AppState::test_new();
+        let mut workspace = Workspace::test_new("repo");
+        let root = workspace.tabs[0].root_pane;
+        let top = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        let bottom = workspace.test_split(ratatui::layout::Direction::Vertical);
+        workspace.tabs[0].layout.focus_pane(root);
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+        app.ensure_test_terminals();
+        (app, [root, top, bottom])
+    }
+
+    const IDENTITY_AREA: Rect = Rect::new(0, 0, 30, 12);
+
+    fn fg_at(buffer: &Buffer, x: u16, y: u16) -> Color {
+        buffer[(x, y)].fg
+    }
+
+    // Cells whose rendering differs between two buffers of the same area.
+    fn changed_cells(a: &Buffer, b: &Buffer) -> Vec<(u16, u16)> {
+        let area = a.area;
+        let mut changed = Vec::new();
+        for y in area.y..area.y + area.height {
+            for x in area.x..area.x + area.width {
+                if a[(x, y)] != b[(x, y)] {
+                    changed.push((x, y));
+                }
+            }
+        }
+        changed
+    }
+
+    fn on_perimeter(rect: Rect, x: u16, y: u16) -> bool {
+        let right = rect.x + rect.width - 1;
+        let bottom = rect.y + rect.height - 1;
+        let in_cols = (rect.x..=right).contains(&x);
+        let in_rows = (rect.y..=bottom).contains(&y);
+        (in_rows && (x == rect.x || x == right)) || (in_cols && (y == rect.y || y == bottom))
+    }
+
+    #[test]
+    fn pane_border_shared_cells_follow_focus_ownership() {
+        let (mut app, [_, top, bottom]) = identity_test_app();
+        let area = IDENTITY_AREA;
+        let top_rect = title_pane_rect(&app, area, top);
+        let bottom_rect = title_pane_rect(&app, area, bottom);
+        let divider_x = top_rect.x;
+        let shared_y = bottom_rect.y;
+        let mid_x = top_rect.x + top_rect.width / 2;
+        let accent = app.palette.accent;
+        let inactive = app.palette.overlay0;
+
+        // Shared dividers: one column owned by root and the right panes, one row owned by
+        // top and bottom; junctions are owned by every adjacent pane.
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(buffer[(divider_x, shared_y)].symbol(), "├");
+        assert_eq!(fg_at(&buffer, divider_x, shared_y), accent);
+        assert_eq!(fg_at(&buffer, divider_x, 2), accent);
+        assert_eq!(fg_at(&buffer, mid_x, shared_y), inactive);
+        assert_eq!(fg_at(&buffer, mid_x, 0), inactive);
+
+        // Any focused owner wins the shared cell; neighbours keep the inactive colour elsewhere.
+        app.workspaces[0].tabs[0].layout.focus_pane(top);
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(fg_at(&buffer, mid_x, shared_y), accent);
+        assert_eq!(fg_at(&buffer, divider_x, 2), accent);
+        assert_eq!(
+            fg_at(&buffer, mid_x, bottom_rect.y + bottom_rect.height - 1),
+            inactive
+        );
+        assert_eq!(fg_at(&buffer, 0, 2), inactive);
+    }
+
+    #[test]
+    fn pane_border_identity_absent_renders_baseline_buffer() {
+        let (mut app, panes) = identity_test_app();
+        for pane in panes {
+            set_tokens(title_terminal(&mut app, pane), &[("role", "build")]);
+        }
+        let baseline = render_title_tab(&app, IDENTITY_AREA);
+
+        // A configured token that is missing on every pane changes nothing.
+        app.pane_border_identity_token =
+            Some(identity_token(r##"{ token = "$absent", fg = "#a6e3a1" }"##));
+        assert_eq!(render_title_tab(&app, IDENTITY_AREA), baseline);
+    }
+
+    #[test]
+    fn pane_border_identity_colors_private_segments_and_neutral_shared_dividers() {
+        let (mut app, [root, top, bottom]) = identity_test_app();
+        set_tokens(title_terminal(&mut app, root), &[("role", "review")]);
+        set_tokens(title_terminal(&mut app, top), &[("role", "build")]);
+        set_tokens(title_terminal(&mut app, bottom), &[("role", "review")]);
+        title_terminal(&mut app, top).set_manual_label("api".into());
+        let area = IDENTITY_AREA;
+        let baseline = render_title_tab(&app, area);
+        let top_rect = title_pane_rect(&app, area, top);
+        let bottom_rect = title_pane_rect(&app, area, bottom);
+        let root_rect = title_pane_rect(&app, area, root);
+        let mid_x = top_rect.x + top_rect.width / 2;
+        let right_x = area.width - 1;
+        let shared_y = bottom_rect.y;
+        let bottom_y = area.height - 1;
+
+        app.pane_border_identity_token = Some(role_identity_token());
+        let buffer = render_title_tab(&app, area);
+
+        // Neighbours differ on their private segments.
+        assert_eq!(fg_at(&buffer, right_x, 2), BUILD_FG);
+        assert_eq!(fg_at(&buffer, right_x, shared_y + 2), REVIEW_FG);
+        assert_eq!(fg_at(&buffer, mid_x, bottom_y), REVIEW_FG);
+        // The divider and junctions they share stay neutral; cells the focused pane owns stay accent.
+        assert_eq!(fg_at(&buffer, mid_x, shared_y), app.palette.overlay0);
+        assert_eq!(fg_at(&buffer, right_x, shared_y), app.palette.overlay0);
+        assert_eq!(fg_at(&buffer, top_rect.x, 2), app.palette.accent);
+        assert_eq!(fg_at(&buffer, 0, 2), app.palette.accent);
+        // Only frame colours of the unfocused panes changed: no glyph, title or terminal cell.
+        for (x, y) in changed_cells(&baseline, &buffer) {
+            assert_eq!(buffer[(x, y)].symbol(), baseline[(x, y)].symbol());
+            assert!(
+                !on_perimeter(root_rect, x, y) || x >= top_rect.x,
+                "({x}, {y})"
+            );
+            assert!(
+                on_perimeter(top_rect, x, y) || on_perimeter(bottom_rect, x, y),
+                "({x}, {y})"
+            );
+            assert!(
+                !(y == 0 && (top_rect.x + 1..top_rect.x + 6).contains(&x)),
+                "title ({x}, {y})"
+            );
+        }
+        assert_eq!(
+            row_text(&buffer, 0, top_rect.x + 1..top_rect.x + 6),
+            " api "
+        );
+
+        // Owners that agree colour the shared divider too.
+        set_tokens(title_terminal(&mut app, top), &[("role", "review")]);
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(fg_at(&buffer, mid_x, shared_y), REVIEW_FG);
+        assert_eq!(fg_at(&buffer, top_rect.x, shared_y), app.palette.accent);
+
+        // With gaps every pane owns its whole frame.
+        set_tokens(title_terminal(&mut app, top), &[("role", "build")]);
+        app.pane_gaps = true;
+        let buffer = render_title_tab(&app, area);
+        let top_rect = title_pane_rect(&app, area, top);
+        let bottom_rect = title_pane_rect(&app, area, bottom);
+        let mid_x = top_rect.x + top_rect.width / 2;
+        assert_eq!(
+            fg_at(&buffer, mid_x, top_rect.y + top_rect.height - 1),
+            BUILD_FG
+        );
+        assert_eq!(fg_at(&buffer, mid_x, bottom_rect.y), REVIEW_FG);
+        assert_eq!(fg_at(&buffer, top_rect.x, 2), BUILD_FG);
+        assert_eq!(fg_at(&buffer, root_rect.x, 2), app.palette.accent);
+    }
+
+    #[test]
+    fn pane_border_identity_four_way_junction_follows_every_owner() {
+        // 2x2 grid: the centre junction is owned by all four panes.
+        let mut app = AppState::test_new();
+        let mut workspace = Workspace::test_new("repo");
+        let top_left = workspace.tabs[0].root_pane;
+        let top_right = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        let bottom_right = workspace.test_split(ratatui::layout::Direction::Vertical);
+        workspace.tabs[0].layout.focus_pane(top_left);
+        let bottom_left = workspace.test_split(ratatui::layout::Direction::Vertical);
+        app.workspaces = vec![workspace];
+        app.active = Some(0);
+        app.ensure_test_terminals();
+        let panes = [top_left, top_right, bottom_left, bottom_right];
+        let area = IDENTITY_AREA;
+        let centre = {
+            let rect = title_pane_rect(&app, area, bottom_right);
+            (rect.x, rect.y)
+        };
+        app.pane_border_identity_token = Some(role_identity_token());
+
+        let render = |app: &mut AppState, roles: [&str; 4], focus: PaneId| {
+            for (pane, role) in panes.iter().zip(roles) {
+                set_tokens(title_terminal(app, *pane), &[("role", role)]);
+            }
+            app.workspaces[0].tabs[0].layout.focus_pane(focus);
+            let buffer = render_title_tab(app, area);
+            assert_eq!(buffer[centre].symbol(), "┼");
+            fg_at(&buffer, centre.0, centre.1)
+        };
+
+        // Any focused owner wins, wherever it sits among disagreeing or unset owners.
+        for focus in panes {
+            for roles in [
+                ["build", "review", "none", "build"],
+                ["review", "build", "build", "none"],
+            ] {
+                assert_eq!(render(&mut app, roles, focus), app.palette.accent);
+            }
+        }
+        // The other three agreeing is not enough while the focused pane owns the cell.
+        assert_eq!(render(&mut app, ["build"; 4], top_left), app.palette.accent);
+        // Unfocused owners elsewhere: the right-edge junction between top_right and bottom_right.
+        let right_x = area.width - 1;
+        render(&mut app, ["build"; 4], top_left);
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(fg_at(&buffer, right_x, centre.1), BUILD_FG);
+        render(&mut app, ["build", "review", "build", "build"], top_left);
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(fg_at(&buffer, right_x, centre.1), app.palette.overlay0);
+    }
+
+    #[test]
+    fn pane_border_identity_focus_wins() {
+        let (mut app, [root, top, bottom]) = identity_test_app();
+        for pane in [root, top, bottom] {
+            set_tokens(title_terminal(&mut app, pane), &[("role", "build")]);
+        }
+        app.pane_border_identity_token = Some(role_identity_token());
+        let area = IDENTITY_AREA;
+        let right_x = area.width - 1;
+
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(fg_at(&buffer, 0, 2), app.palette.accent);
+        assert_eq!(fg_at(&buffer, right_x, 2), BUILD_FG);
+
+        app.workspaces[0].tabs[0].layout.focus_pane(top);
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(fg_at(&buffer, 0, 2), BUILD_FG);
+        assert_eq!(fg_at(&buffer, right_x, 2), app.palette.accent);
+        let shared_y = title_pane_rect(&app, area, bottom).y;
+        assert_eq!(fg_at(&buffer, right_x, shared_y), app.palette.accent);
+        assert_eq!(fg_at(&buffer, right_x, shared_y + 2), BUILD_FG);
+    }
+
+    #[test]
+    fn pane_border_identity_without_fg_keeps_inactive_color() {
+        let (mut app, [root, top, bottom]) = identity_test_app();
+        set_tokens(title_terminal(&mut app, root), &[("role", "build")]);
+        set_tokens(title_terminal(&mut app, top), &[("role", "other")]);
+        set_tokens(title_terminal(&mut app, bottom), &[("role", "   ")]);
+        let baseline = render_title_tab(&app, IDENTITY_AREA);
+
+        // No fg anywhere, a rule that does not match, and a blank value invent no colour.
+        for token in [
+            r#""$role""#,
+            r#"{ token = "$role", bold = true }"#,
+            r##"{ token = "$role", rules = [{ equals = "build", fg = "#a6e3a1" }] }"##,
+        ] {
+            app.pane_border_identity_token = Some(identity_token(token));
+            assert_eq!(render_title_tab(&app, IDENTITY_AREA), baseline, "{token}");
+        }
+    }
+
+    #[test]
+    fn pane_border_identity_fallback_keeps_explicit_reset() {
+        let (mut app, [_, top, bottom]) = identity_test_app();
+        set_tokens(title_terminal(&mut app, top), &[("role", "build")]);
+        app.palette.overlay0 = Color::Reset;
+        app.pane_border_identity_token = Some(role_identity_token());
+        let area = IDENTITY_AREA;
+        let buffer = render_title_tab(&app, area);
+        let shared_y = title_pane_rect(&app, area, bottom).y;
+        let right_x = area.width - 1;
+
+        assert_eq!(fg_at(&buffer, right_x, 2), BUILD_FG);
+        assert_eq!(fg_at(&buffer, right_x, shared_y), Color::Reset);
+        assert_eq!(fg_at(&buffer, right_x, shared_y + 2), Color::Reset);
+    }
+
+    /// C2 x FC1: with all three keys set, focus takes `pane_border_active`, an
+    /// identity colour beats `pane_border_inactive`, and every inactive fallback
+    /// (no identity, disagreeing owners) takes `pane_border_inactive`.
+    #[test]
+    fn pane_border_identity_composes_with_focus_color_overrides() {
+        let active = Color::Rgb(0xff, 0x00, 0x00);
+        let inactive = Color::Rgb(0x00, 0x00, 0xff);
+        let (mut app, [root, top, bottom]) = identity_test_app();
+        set_tokens(title_terminal(&mut app, root), &[("role", "review")]);
+        set_tokens(title_terminal(&mut app, top), &[("role", "build")]);
+        set_tokens(title_terminal(&mut app, bottom), &[("role", "none")]);
+        app.palette.pane_border_active = Some(active);
+        app.palette.pane_border_inactive = Some(inactive);
+        app.pane_border_identity_token = Some(role_identity_token());
+        let area = IDENTITY_AREA;
+        let top_rect = title_pane_rect(&app, area, top);
+        let bottom_rect = title_pane_rect(&app, area, bottom);
+        let mid_x = top_rect.x + top_rect.width / 2;
+        let right_x = area.width - 1;
+        let shared_y = bottom_rect.y;
+        let bottom_y = area.height - 1;
+
+        let buffer = render_title_tab(&app, area);
+        // Focus wins with the FC1 active colour, including the divider it shares.
+        assert_eq!(fg_at(&buffer, 0, 2), active);
+        assert_eq!(fg_at(&buffer, top_rect.x, 2), active);
+        // An identity colour wins over the FC1 inactive colour.
+        assert_eq!(fg_at(&buffer, right_x, 2), BUILD_FG);
+        // No identity on `bottom`, and the top/bottom shared row disagrees: FC1 inactive.
+        assert_eq!(fg_at(&buffer, mid_x, bottom_y), inactive);
+        assert_eq!(fg_at(&buffer, mid_x, shared_y), inactive);
+        assert_eq!(fg_at(&buffer, right_x, shared_y), inactive);
+        // Titles follow the same FC1 colours; no raw accent/overlay0 is left.
+        for y in 0..area.height {
+            for x in 0..area.width {
+                let fg = fg_at(&buffer, x, y);
+                if buffer[(x, y)].symbol() != " " {
+                    assert_ne!(fg, app.palette.accent, "raw accent at ({x}, {y})");
+                    assert_ne!(fg, app.palette.overlay0, "raw overlay0 at ({x}, {y})");
+                }
+            }
+        }
+
+        // Moving focus: the newly focused pane takes active, root keeps its identity.
+        app.workspaces[0].tabs[0].layout.focus_pane(top);
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(fg_at(&buffer, right_x, 2), active);
+        assert_eq!(fg_at(&buffer, 0, 2), REVIEW_FG);
+        assert_eq!(fg_at(&buffer, mid_x, bottom_y), inactive);
+
+        // Removing the identity key leaves the plain FC1 focus colours.
+        app.pane_border_identity_token = None;
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(fg_at(&buffer, right_x, 2), active);
+        assert_eq!(fg_at(&buffer, 0, 2), inactive);
+    }
+
+    /// C2 x pane border styles: the glyph comes from the styles and the color from
+    /// identity/FC1, independently. For every focus position, shared and separate
+    /// frames, FC1 on and off, and several style mixes, the identity render has the
+    /// identity-free styled render's symbols and the stock-glyph identity render's
+    /// styles, cell for cell.
+    #[test]
+    fn pane_border_identity_colors_and_style_glyphs_stay_independent() {
+        let (mut app, panes) = identity_test_app();
+        let [root, top, bottom] = panes;
+        set_tokens(title_terminal(&mut app, root), &[("role", "review")]);
+        set_tokens(title_terminal(&mut app, top), &[("role", "build")]);
+        set_tokens(title_terminal(&mut app, bottom), &[("role", "review")]);
+        let area = IDENTITY_AREA;
+        let identity_colors = [Color::Rgb(0xa6, 0xe3, 0xa1), Color::Rgb(0xf9, 0xe2, 0xaf)];
+        let mixes = [
+            styles(None, Some("heavy"), None),
+            styles(Some("heavy"), Some("double"), None),
+            styles(
+                Some("rounded"),
+                Some("heavy-dashed-3"),
+                Some("light-dashed-2"),
+            ),
+            styles(Some("double"), None, Some("rounded-dashed-4")),
+        ];
+        for focused in panes {
+            app.workspaces[0].tabs[0].layout.focus_pane(focused);
+            for gaps in [false, true] {
+                app.pane_gaps = gaps;
+                for fc1 in [false, true] {
+                    app.palette.pane_border_active = fc1.then_some(Color::Rgb(0xff, 0x00, 0x00));
+                    app.palette.pane_border_inactive = fc1.then_some(Color::Rgb(0x00, 0xff, 0x00));
+                    for mix in mixes {
+                        let case = format!("focused={focused:?} gaps={gaps} fc1={fc1} {mix:?}");
+                        app.pane_border_identity_token = None;
+                        app.pane_border_styles = mix;
+                        let glyphs = render_title_tab(&app, area);
+                        app.pane_border_identity_token = Some(role_identity_token());
+                        let both = render_title_tab(&app, area);
+                        app.pane_border_styles = PaneBorderStyles::default();
+                        let colors = render_title_tab(&app, area);
+                        assert_ne!(glyphs, colors, "styles change glyphs: {case}");
+                        assert!(
+                            cells_where(&both, |cell| identity_colors.contains(&cell.fg)).len() > 1,
+                            "identity color present: {case}"
+                        );
+                        for y in area.y..area.y + area.height {
+                            for x in area.x..area.x + area.width {
+                                assert_eq!(
+                                    both[(x, y)].symbol(),
+                                    glyphs[(x, y)].symbol(),
+                                    "glyph at ({x}, {y}): {case}"
+                                );
+                                assert_eq!(
+                                    both[(x, y)].style(),
+                                    colors[(x, y)].style(),
+                                    "style at ({x}, {y}): {case}"
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn pane_border_identity_single_and_zoomed_panes_stay_focused() {
+        let (mut app, panes) = title_test_app(false);
+        set_tokens(title_terminal(&mut app, panes[0]), &[("role", "build")]);
+        app.pane_borders = PaneBordersConfig::Always;
+        app.pane_border_identity_token = Some(role_identity_token());
+        let area = Rect::new(0, 0, 30, 5);
+
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(buffer[(0, 0)].symbol(), "┌");
+        for (x, y) in [(0, 2), (29, 2), (10, 4), (29, 4)] {
+            assert_eq!(fg_at(&buffer, x, y), app.palette.accent, "({x}, {y})");
+        }
+
+        let (mut app, panes) = title_test_app(true);
+        for pane in &panes {
+            set_tokens(title_terminal(&mut app, *pane), &[("role", "build")]);
+        }
+        app.pane_border_identity_token = Some(role_identity_token());
+        app.workspaces[0].zoomed = true;
+        let buffer = render_title_tab(&app, area);
+        assert_eq!(buffer[(0, 0)].symbol(), "┌");
+        for (x, y) in [(0, 2), (29, 2), (10, 4)] {
+            assert_eq!(fg_at(&buffer, x, y), app.palette.accent, "({x}, {y})");
+        }
+    }
+
+    fn info_with_rect(template: &PaneInfo, rect: Rect) -> PaneInfo {
+        PaneInfo {
+            rect,
+            inner_rect: rect,
+            ..template.clone()
+        }
+    }
+
+    #[test]
+    fn line_touch_cells_visits_exactly_the_cells_line_touches_pane_accepts() {
+        let template = Workspace::test_new("repo").tabs[0]
+            .layout
+            .panes(IDENTITY_AREA)[0]
+            .clone();
+        let scan = |info: &PaneInfo,
+                    pane_gaps: bool,
+                    xs: std::ops::RangeInclusive<u16>,
+                    ys: std::ops::RangeInclusive<u16>| {
+            let mut visited = std::collections::HashSet::new();
+            line_touch_cells(info, pane_gaps, |x, y| {
+                visited.insert((x, y));
+            });
+            for y in ys {
+                for x in xs.clone() {
+                    assert_eq!(
+                        visited.contains(&(x, y)),
+                        line_touches_pane(x, y, info, pane_gaps),
+                        "rect {:?} gaps {pane_gaps} ({x}, {y})",
+                        info.rect
+                    );
+                }
+            }
+            visited.len()
+        };
+        for pane_gaps in [false, true] {
+            for (x, y) in [(0, 0), (1, 2), (4, 3)] {
+                for width in 0..5 {
+                    for height in 0..5 {
+                        let info = info_with_rect(&template, Rect::new(x, y, width, height));
+                        let visited = scan(&info, pane_gaps, 0..=10, 0..=10);
+                        assert_eq!(visited == 0, width == 0 || height == 0);
+                    }
+                }
+            }
+            // Saturating edges at the end of the coordinate space.
+            for (width, height) in [(1, 1), (3, 2), (8, 8)] {
+                let rect = Rect {
+                    x: u16::MAX - 3,
+                    y: u16::MAX - 2,
+                    width,
+                    height,
+                };
+                let info = info_with_rect(&template, rect);
+                scan(
+                    &info,
+                    pane_gaps,
+                    u16::MAX - 6..=u16::MAX,
+                    u16::MAX - 6..=u16::MAX,
+                );
+            }
+        }
+    }
+
+    // Builds a layout from `(focused pane index, direction)` splits, in creation order.
+    fn oracle_workspace(splits: &[(usize, ratatui::layout::Direction)]) -> Workspace {
+        let mut workspace = Workspace::test_new("repo");
+        let mut panes = vec![workspace.tabs[0].root_pane];
+        for &(target, direction) in splits {
+            workspace.tabs[0].layout.focus_pane(panes[target]);
+            panes.push(workspace.test_split(direction));
+        }
+        workspace
+    }
+
+    // Deterministic identity assignments: every combination up to four panes, a fixed
+    // spread of agreeing, disagreeing and unset neighbours beyond that.
+    fn oracle_identity_sets(panes: usize) -> Vec<Vec<Option<Color>>> {
+        let values: &[Option<Color>] = if panes <= 3 {
+            &[None, Some(BUILD_FG), Some(REVIEW_FG), Some(Color::Reset)]
+        } else {
+            &[None, Some(BUILD_FG), Some(REVIEW_FG)]
+        };
+        let base = values.len();
+        if panes <= 4 {
+            return (0..base.pow(panes as u32))
+                .map(|mut combo| {
+                    (0..panes)
+                        .map(|_| {
+                            let value = values[combo % base];
+                            combo /= base;
+                            value
+                        })
+                        .collect()
+                })
+                .collect();
+        }
+        let mut sets = vec![
+            vec![Some(BUILD_FG); panes],
+            vec![None; panes],
+            (0..panes)
+                .map(|pane| Some(if pane % 2 == 0 { BUILD_FG } else { REVIEW_FG }))
+                .collect(),
+        ];
+        let mut seed = 0x2545_f491_u32 ^ panes as u32;
+        for _ in 0..40 {
+            sets.push(
+                (0..panes)
+                    .map(|_| {
+                        seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                        values[(seed >> 16) as usize % base]
+                    })
+                    .collect(),
+            );
+        }
+        sets
+    }
+
+    #[test]
+    fn border_line_owners_match_per_cell_walk_on_every_border_cell() {
+        use ratatui::layout::Direction::{Horizontal as H, Vertical as V};
+        let layouts: &[(&str, &[(usize, ratatui::layout::Direction)])] = &[
+            ("two columns", &[(0, H)]),
+            ("two rows", &[(0, V)]),
+            ("three-way junctions", &[(0, H), (1, V)]),
+            ("2x2 four-way junction", &[(0, H), (0, V), (1, V)]),
+            ("offset grid", &[(0, H), (0, V), (1, V), (3, V)]),
+            ("three columns", &[(0, H), (1, H)]),
+            ("four rows", &[(0, V), (1, V), (2, V)]),
+            ("nested spiral", &[(0, H), (1, V), (2, H), (3, V), (4, H)]),
+            ("3x2 grid", &[(0, H), (1, H), (0, V), (1, V), (2, V)]),
+        ];
+        // (layout area, buffer area): an offset area inside a larger buffer keeps the shared
+        // column/row past the last pane addressable.
+        let areas = [
+            (IDENTITY_AREA, IDENTITY_AREA),
+            (Rect::new(3, 2, 23, 9), Rect::new(0, 0, 40, 16)),
+            (Rect::new(0, 0, 7, 5), Rect::new(0, 0, 7, 5)),
+        ];
+        let default_palette = AppState::test_new().palette;
+        let override_palette = Palette {
+            pane_border_active: Some(Color::Rgb(0x89, 0xb4, 0xfa)),
+            pane_border_inactive: Some(Color::Rgb(0x31, 0x32, 0x44)),
+            ..default_palette.clone()
+        };
+        let palettes = [default_palette, override_palette];
+        let (mut active_cells, mut identity_cells, mut inactive_cells) = (0usize, 0usize, 0usize);
+        let mut compared = 0usize;
+
+        for (name, splits) in layouts {
+            let workspace = oracle_workspace(splits);
+            let layout = &workspace.tabs[0].layout;
+            for (area, buffer_area) in areas {
+                for pane_borders in [PaneBordersConfig::Auto, PaneBordersConfig::Always] {
+                    for outer in [true, false] {
+                        for spacing in [
+                            PaneSpacing::Legacy(false),
+                            PaneSpacing::Legacy(true),
+                            PaneSpacing::Cells(1),
+                            PaneSpacing::Cells(2),
+                        ] {
+                            let (mut infos, gaps) = apply_pane_spacing(
+                                layout.panes(area),
+                                pane_borders,
+                                spacing,
+                                outer,
+                            );
+                            let mut cells = std::collections::HashMap::new();
+                            for info in &infos {
+                                add_pane_border_cells(&mut cells, info);
+                            }
+                            add_split_border_cells(gaps.separate, &layout.splits(area), &mut cells);
+                            let border_cells: Vec<(u16, u16)> = cells
+                                .keys()
+                                .copied()
+                                .filter(|&(x, y)| buffer_area.contains((x, y).into()))
+                                .collect();
+                            if area == IDENTITY_AREA {
+                                assert!(!border_cells.is_empty(), "{name} {spacing:?}");
+                            }
+
+                            // Every focus position, plus no focused pane.
+                            for focus in 0..=infos.len() {
+                                for (index, info) in infos.iter_mut().enumerate() {
+                                    info.is_focused = index == focus;
+                                }
+                                for (set, identities) in
+                                    oracle_identity_sets(infos.len()).iter().enumerate()
+                                {
+                                    let palette = &palettes[set % palettes.len()];
+                                    let owners = BorderLineOwners::new(
+                                        buffer_area,
+                                        &infos,
+                                        identities,
+                                        gaps.separate,
+                                    );
+                                    for &(x, y) in &border_cells {
+                                        let expected = identity_line_color(
+                                            palette,
+                                            &infos,
+                                            identities,
+                                            x,
+                                            y,
+                                            gaps.separate,
+                                        );
+                                        assert_eq!(
+                                            owners.line_color(palette, x, y),
+                                            expected,
+                                            "{name} area {area:?} {pane_borders:?} outer {outer} \
+                                             {spacing:?} focus {focus} identities {identities:?} \
+                                             ({x}, {y})"
+                                        );
+                                        compared += 1;
+                                        if expected == pane_border_active_color(palette) {
+                                            active_cells += 1;
+                                        } else if expected == pane_border_inactive_color(palette) {
+                                            inactive_cells += 1;
+                                        } else {
+                                            identity_cells += 1;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert!(compared > 100_000, "{compared}");
+        assert!(active_cells > 0 && identity_cells > 0 && inactive_cells > 0);
+    }
+
+    #[test]
+    fn border_line_owners_render_matches_per_cell_walk() {
+        // End to end through token resolution: rendered frame colours equal the oracle's.
+        let (mut app, [root, top, bottom]) = identity_test_app();
+        app.pane_border_identity_token = Some(role_identity_token());
+        let area = IDENTITY_AREA;
+        for roles in [
+            ["build", "build", "build"],
+            ["review", "build", "review"],
+            ["none", "review", "review"],
+        ] {
+            for (pane, role) in [root, top, bottom].into_iter().zip(roles) {
+                set_tokens(title_terminal(&mut app, pane), &[("role", role)]);
+            }
+            for focus in [root, top, bottom] {
+                for pane_gaps in [false, true] {
+                    app.pane_gaps = pane_gaps;
+                    app.workspaces[0].tabs[0].layout.focus_pane(focus);
+                    let buffer = render_title_tab(&app, area);
+                    let ws = &app.workspaces[0];
+                    let (infos, gaps) = apply_pane_spacing(
+                        ws.tabs[0].layout.panes(area),
+                        app.pane_borders,
+                        app.pane_spacing(),
+                        app.pane_outer_borders,
+                    );
+                    let token = app.pane_border_identity_token.as_ref().unwrap();
+                    let identities: Vec<_> = infos
+                        .iter()
+                        .map(|info| pane_border_identity_color(&app, ws, info, token))
+                        .collect();
+                    let mut cells = std::collections::HashMap::new();
+                    for info in &infos {
+                        add_pane_border_cells(&mut cells, info);
+                    }
+                    for (x, y) in cells.into_keys() {
+                        if buffer[(x, y)].symbol().trim().is_empty()
+                            || !"─│┌┐└┘├┤┬┴┼".contains(buffer[(x, y)].symbol())
+                        {
+                            continue;
+                        }
+                        assert_eq!(
+                            fg_at(&buffer, x, y),
+                            identity_line_color(
+                                &app.palette,
+                                &infos,
+                                &identities,
+                                x,
+                                y,
+                                gaps.separate
+                            ),
+                            "roles {roles:?} gaps {pane_gaps} ({x}, {y})"
+                        );
+                    }
+                }
+            }
+        }
     }
 }
