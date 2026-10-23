@@ -275,6 +275,8 @@ You can override individual colors:
 
 ```toml
 [theme.custom]
+active_tab_fg = "#181825"
+active_tab_bg = "#89b4fa"
 sidebar_bg = "#181825"
 active_row_bg = "#1e1e2e"
 selection_bg = "#313244"
@@ -288,7 +290,9 @@ yellow = "#f9e2af"
 
 `sidebar_bg` optionally gives the desktop sidebar its own background. When omitted, the sidebar keeps the host terminal background. `active_row_bg` changes the active Space and focused Agent row background without affecting separators or scrollbar tracks. `selection_bg` changes the Navigate-mode cursor row background in the sidebar.
 
-Color values accept hex, named colors, `rgb(r,g,b)`, or reset aliases like `reset`, `default`, `none`, and `transparent`.
+`active_tab_fg` and `active_tab_bg` independently change only the focused tab label, not inactive tabs or status segments. If omitted, the foreground follows the resolved `panel_bg` (`surface_dim` when `panel_bg` is reset), and the background follows the resolved `accent`. Reset aliases explicitly use terminal defaults; they do not mean inheritance. Custom labels keep their existing bold emphasis. These colors do not change tab bar visibility.
+
+Color values accept hex (`#rgb` or `#rrggbb`), named colors, `rgb(r,g,b)`, or reset aliases like `reset`, `default`, `none`, and `transparent`.
 
 When `auto_switch` is enabled, optional light and dark subtables layer on top of the shared custom colors:
 
@@ -297,15 +301,19 @@ When `auto_switch` is enabled, optional light and dark subtables layer on top of
 accent = "#89b4fa"
 
 [theme.custom.light]
+active_tab_fg = "#eff1f5"
+active_tab_bg = "#1e66f5"
 panel_bg = "#eff1f5"
 text = "#4c4f69"
 
 [theme.custom.dark]
+active_tab_fg = "#181825"
+active_tab_bg = "#89b4fa"
 panel_bg = "#1e1e2e"
 text = "#cdd6f4"
 ```
 
-The active palette is applied in this order: built-in theme, `[theme.custom]`, then `[theme.custom.light]` or `[theme.custom.dark]`. Omitting the mode subtables preserves the existing shared override behavior.
+The active palette is applied in this order: built-in theme, `[theme.custom]`, then `[theme.custom.light]` or `[theme.custom.dark]`. Omitting a mode field inherits its common value; omitting both active-tab fields restores the dynamic fallbacks above. Mode overrides are ignored when `auto_switch` is disabled. Initial load, live config reload, and host appearance changes use the same resolution. Removing an active-tab override on reload restores inheritance or fallback.
 
 ## UI and sidebar
 

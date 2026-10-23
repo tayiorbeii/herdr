@@ -271,6 +271,8 @@ dark_name = "catppuccin"
 
 ```toml
 [theme.custom]
+active_tab_fg = "#181825"
+active_tab_bg = "#89b4fa"
 sidebar_bg = "#181825"
 active_row_bg = "#1e1e2e"
 selection_bg = "#313244"
@@ -284,7 +286,9 @@ yellow = "#f9e2af"
 
 `sidebar_bg` 可单独设置桌面侧边栏的背景色。省略时，侧边栏继续使用宿主终端背景。`active_row_bg` 可更改当前 Space 和已聚焦 Agent 行的背景色，而不会影响分隔线或滚动条轨道。`selection_bg` 可更改侧边栏中 Navigate 模式光标行的背景色。
 
-颜色值支持十六进制、命名颜色、`rgb(r,g,b)`，以及 `reset`、`default`、`none`、`transparent` 等重置别名。
+`active_tab_fg` 和 `active_tab_bg` 可独立更改已聚焦标签页标签的前景色与背景色，不影响非活动标签页或状态段。省略时，前景色跟随解析后的 `panel_bg`（当 `panel_bg` 为重置值时使用 `surface_dim`），背景色跟随解析后的 `accent`。重置别名明确使用终端默认色，而不是继承。自定义标签保留原有粗体，标签栏的显示条件也不会改变。
+
+颜色值支持十六进制（`#rgb` 或 `#rrggbb`）、命名颜色、`rgb(r,g,b)`，以及 `reset`、`default`、`none`、`transparent` 等重置别名。
 
 启用 `auto_switch` 后，可以通过明暗模式子表在共享自定义颜色之上应用不同的覆盖值：
 
@@ -293,15 +297,19 @@ yellow = "#f9e2af"
 accent = "#89b4fa"
 
 [theme.custom.light]
+active_tab_fg = "#eff1f5"
+active_tab_bg = "#1e66f5"
 panel_bg = "#eff1f5"
 text = "#4c4f69"
 
 [theme.custom.dark]
+active_tab_fg = "#181825"
+active_tab_bg = "#89b4fa"
 panel_bg = "#1e1e2e"
 text = "#cdd6f4"
 ```
 
-有效调色板按以下顺序应用：内置主题、`[theme.custom]`，然后是 `[theme.custom.light]` 或 `[theme.custom.dark]`。省略模式子表时，会保留现有的共享覆盖行为。
+有效调色板按以下顺序应用：内置主题、`[theme.custom]`，然后是 `[theme.custom.light]` 或 `[theme.custom.dark]`。省略模式字段时继承公共值；公共活动标签颜色也省略时，使用上述动态默认色。禁用 `auto_switch` 时忽略模式覆盖。首次加载、实时重载配置和宿主外观变化使用同一解析逻辑。重载时移除活动标签颜色覆盖会恢复继承或默认色。
 
 ## UI 与侧边栏
 
