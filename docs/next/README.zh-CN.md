@@ -55,6 +55,8 @@ herdr
 
 在 `[ui]` 下设置 `rounded_borders = true`，即可为现有界面边框启用圆角。默认保持不变；终端内容、尺寸和共享连接处均保持原样。参见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
 
+在 `[ui]` 下用 `pane_border_style` 选择窗格边框线型（`light`、`rounded`、`heavy`、`double` 及虚线变体），并可用 `pane_border_style_active` / `pane_border_style_inactive` 分别覆盖聚焦或未聚焦窗格的线型。默认保持不变，窗格尺寸和分隔线均保持原样。参见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
+
 ## 文档
 
 所有文档都在 [herdr.dev/docs](https://herdr.dev/zh-cn/docs/)：[快速开始](https://herdr.dev/zh-cn/docs/quick-start/) · [核心概念](https://herdr.dev/zh-cn/docs/concepts/) · [受支持的智能体](https://herdr.dev/zh-cn/docs/agents/) · [键盘](https://herdr.dev/zh-cn/docs/keyboard/) · [配置](https://herdr.dev/zh-cn/docs/configuration/) · [会话状态](https://herdr.dev/zh-cn/docs/session-state/) · [连接机器](https://herdr.dev/zh-cn/docs/connecting-machines/) · [远程访问](https://herdr.dev/zh-cn/docs/persistence-remote/) · [集成](https://herdr.dev/zh-cn/docs/integrations/) · [为智能体添加 herdr 支持](https://herdr.dev/zh-cn/docs/add-herdr-support/) · [插件](https://herdr.dev/zh-cn/docs/plugins/) · [socket api](https://herdr.dev/zh-cn/docs/socket-api/)

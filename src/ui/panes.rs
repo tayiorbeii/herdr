@@ -13,6 +13,7 @@ use super::text::truncate_end;
 use super::widgets::panel_contrast_fg;
 use crate::app::state::Palette;
 use crate::app::AppState;
+use crate::config::{BorderDash, PaneBorderStyle};
 use crate::layout::{PaneId, PaneInfo};
 use crate::popup_size::resolve_popup_geometry;
 use crate::terminal::{TerminalRuntime, TerminalRuntimeRegistry};
@@ -576,6 +577,17 @@ fn render_pane_borders(
         add_pane_border_cells(&mut cells, info);
     }
     add_split_border_cells(app.pane_gaps, split_borders, &mut cells);
+    // All style keys unset keeps the stock glyph path below.
+    let styles = app
+        .pane_border_styles
+        .resolved()
+        .map(|(active, inactive)| (LineStyle::of(active), LineStyle::of(inactive)));
+    let focus_frame = styles.and_then(|_| {
+        pane_infos
+            .iter()
+            .find(|info| info.is_focused)
+            .and_then(|info| FocusFrame::of(info, app.pane_gaps))
+    });
 
     let buf = frame.buffer_mut();
     let area = buf.area;
@@ -590,7 +602,14 @@ fn render_pane_borders(
         let focused = pane_infos
             .iter()
             .any(|info| info.is_focused && line_touches_pane(x, y, info, app.pane_gaps));
-        let symbol = line_cell_symbol(line);
+        let symbol = match styles {
+            Some((active, inactive)) => {
+                let owned =
+                    focus_frame.map_or_else(LineCell::default, |frame| frame.owned_arms(x, y));
+                styled_line_cell_symbol(line, owned, active, inactive)
+            }
+            None => line_cell_symbol(line),
+        };
         if symbol.is_empty() {
             continue;
         }
@@ -802,6 +821,335 @@ fn line_cell_symbol(line: LineCell) -> &'static str {
     }
 }
 
+/// Glyph family of one border arm. Arms of a cell may differ; Unicode box
+/// drawing has a glyph for every light/heavy combination and for light/double
+/// mixes across the two axes. Double has no heavy mixes, so a cell with a
+/// double arm and a heavy arm is drawn entirely double.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum LineWeight {
+    #[default]
+    Light,
+    Heavy,
+    Double,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct LineWeights {
+    up: LineWeight,
+    down: LineWeight,
+    left: LineWeight,
+    right: LineWeight,
+}
+
+/// Glyph traits of one `PaneBorderStyle`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct LineStyle {
+    weight: LineWeight,
+    dash: Option<BorderDash>,
+    rounded: bool,
+}
+
+impl LineStyle {
+    fn of(style: PaneBorderStyle) -> Self {
+        let (weight, dash, rounded) = match style {
+            PaneBorderStyle::Light => (LineWeight::Light, None, false),
+            PaneBorderStyle::Rounded => (LineWeight::Light, None, true),
+            PaneBorderStyle::Heavy => (LineWeight::Heavy, None, false),
+            PaneBorderStyle::Double => (LineWeight::Double, None, false),
+            PaneBorderStyle::LightDashed(dash) => (LineWeight::Light, Some(dash), false),
+            PaneBorderStyle::HeavyDashed(dash) => (LineWeight::Heavy, Some(dash), false),
+            PaneBorderStyle::RoundedDashed(dash) => (LineWeight::Light, Some(dash), true),
+        };
+        Self {
+            weight,
+            dash,
+            rounded,
+        }
+    }
+}
+
+/// Border rectangle owned by the focused pane: its own frame plus, without
+/// pane gaps, the shared divider column/row it touches to the right and below
+/// (the same cells `line_touches_pane` accents).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FocusFrame {
+    left: u16,
+    top: u16,
+    right: u16,
+    bottom: u16,
+}
+
+impl FocusFrame {
+    fn of(info: &PaneInfo, pane_gaps: bool) -> Option<Self> {
+        let rect = info.rect;
+        if rect.width == 0 || rect.height == 0 {
+            return None;
+        }
+        let shared_right = rect.x.saturating_add(rect.width);
+        let shared_bottom = rect.y.saturating_add(rect.height);
+        let own_right = pane_gaps || info.borders.contains(Borders::RIGHT);
+        let own_bottom = pane_gaps || info.borders.contains(Borders::BOTTOM);
+        Some(Self {
+            left: rect.x,
+            top: rect.y,
+            right: if own_right {
+                shared_right.saturating_sub(1)
+            } else {
+                shared_right
+            },
+            bottom: if own_bottom {
+                shared_bottom.saturating_sub(1)
+            } else {
+                shared_bottom
+            },
+        })
+    }
+
+    /// Whether the segment from `(x, y)` to `(x + 1, y)` lies on this frame.
+    fn owns_horizontal(&self, x: u16, y: u16) -> bool {
+        (y == self.top || y == self.bottom) && x >= self.left && x < self.right
+    }
+
+    /// Whether the segment from `(x, y)` to `(x, y + 1)` lies on this frame.
+    fn owns_vertical(&self, x: u16, y: u16) -> bool {
+        (x == self.left || x == self.right) && y >= self.top && y < self.bottom
+    }
+
+    /// Which arms of the cell at `(x, y)` lie on this frame. Both halves of a
+    /// segment agree, so merged junctions stay connected.
+    fn owned_arms(&self, x: u16, y: u16) -> LineCell {
+        LineCell {
+            up: y.checked_sub(1).is_some_and(|y| self.owns_vertical(x, y)),
+            down: self.owns_vertical(x, y),
+            left: x.checked_sub(1).is_some_and(|x| self.owns_horizontal(x, y)),
+            right: self.owns_horizontal(x, y),
+        }
+    }
+}
+
+/// Glyph of one pane border cell. Each arm takes the weight of the style that
+/// owns it (`active` on the focused frame, `inactive` elsewhere). The cell's
+/// winning style, active when any present arm is on the focused frame (the
+/// same rule as the accent color), decides dashes and arcs.
+fn styled_line_cell_symbol(
+    line: LineCell,
+    owned: LineCell,
+    active: LineStyle,
+    inactive: LineStyle,
+) -> &'static str {
+    let style = |owned: bool| if owned { active } else { inactive };
+    let weights = LineWeights {
+        up: style(owned.up).weight,
+        down: style(owned.down).weight,
+        left: style(owned.left).weight,
+        right: style(owned.right).weight,
+    };
+    let winner = style(
+        (line.up && owned.up)
+            || (line.down && owned.down)
+            || (line.left && owned.left)
+            || (line.right && owned.right),
+    );
+    if let Some(symbol) = winner
+        .dash
+        .and_then(|dash| dashed_line_cell_symbol(line, weights, dash))
+    {
+        return symbol;
+    }
+    if winner.rounded {
+        if let Some(symbol) = arc_line_cell_symbol(line, weights) {
+            return symbol;
+        }
+    }
+    weighted_line_cell_symbol(line, weights)
+}
+
+/// The shared weight of an axis's present arms, or `None` when the axis has
+/// no arm or its two arms differ.
+fn axis_weight(first: Option<LineWeight>, second: Option<LineWeight>) -> Option<LineWeight> {
+    match (first, second) {
+        (Some(first), Some(second)) => (first == second).then_some(first),
+        (Some(weight), None) | (None, Some(weight)) => Some(weight),
+        (None, None) => None,
+    }
+}
+
+/// Dashed glyph for a straight run of one light or heavy weight. A lone arm
+/// draws a full straight line (as in `line_cell_symbol`), so it counts as
+/// straight. Corners, T-junctions, crosses and double lines have no dashed
+/// glyphs and stay solid.
+fn dashed_line_cell_symbol(
+    line: LineCell,
+    weights: LineWeights,
+    dash: BorderDash,
+) -> Option<&'static str> {
+    use ratatui::symbols::line;
+    let vertical = match (line.up, line.down, line.left, line.right) {
+        (_, _, false, false) => axis_weight(
+            line.up.then_some(weights.up),
+            line.down.then_some(weights.down),
+        )
+        .map(|weight| (true, weight)),
+        (false, false, _, _) => axis_weight(
+            line.left.then_some(weights.left),
+            line.right.then_some(weights.right),
+        )
+        .map(|weight| (false, weight)),
+        _ => None,
+    };
+    Some(match (vertical?, dash) {
+        ((true, LineWeight::Light), BorderDash::Two) => line::LIGHT_DOUBLE_DASH_VERTICAL,
+        ((true, LineWeight::Light), BorderDash::Three) => line::LIGHT_TRIPLE_DASH_VERTICAL,
+        ((true, LineWeight::Light), BorderDash::Four) => line::LIGHT_QUADRUPLE_DASH_VERTICAL,
+        ((true, LineWeight::Heavy), BorderDash::Two) => line::HEAVY_DOUBLE_DASH_VERTICAL,
+        ((true, LineWeight::Heavy), BorderDash::Three) => line::HEAVY_TRIPLE_DASH_VERTICAL,
+        ((true, LineWeight::Heavy), BorderDash::Four) => line::HEAVY_QUADRUPLE_DASH_VERTICAL,
+        ((false, LineWeight::Light), BorderDash::Two) => line::LIGHT_DOUBLE_DASH_HORIZONTAL,
+        ((false, LineWeight::Light), BorderDash::Three) => line::LIGHT_TRIPLE_DASH_HORIZONTAL,
+        ((false, LineWeight::Light), BorderDash::Four) => line::LIGHT_QUADRUPLE_DASH_HORIZONTAL,
+        ((false, LineWeight::Heavy), BorderDash::Two) => line::HEAVY_DOUBLE_DASH_HORIZONTAL,
+        ((false, LineWeight::Heavy), BorderDash::Three) => line::HEAVY_TRIPLE_DASH_HORIZONTAL,
+        ((false, LineWeight::Heavy), BorderDash::Four) => line::HEAVY_QUADRUPLE_DASH_HORIZONTAL,
+        ((_, LineWeight::Double), _) => return None,
+    })
+}
+
+/// Arc for a right-angle corner whose two arms are light. Unicode has no
+/// heavy, double or mixed arcs, so those corners stay square.
+fn arc_line_cell_symbol(line: LineCell, weights: LineWeights) -> Option<&'static str> {
+    use ratatui::symbols::line;
+    let light = |present: bool, weight: LineWeight| !present || weight == LineWeight::Light;
+    if !(light(line.up, weights.up)
+        && light(line.down, weights.down)
+        && light(line.left, weights.left)
+        && light(line.right, weights.right))
+    {
+        return None;
+    }
+    match (line.up, line.down, line.left, line.right) {
+        (false, true, false, true) => Some(line::ROUNDED_TOP_LEFT),
+        (false, true, true, false) => Some(line::ROUNDED_TOP_RIGHT),
+        (true, false, false, true) => Some(line::ROUNDED_BOTTOM_LEFT),
+        (true, false, true, false) => Some(line::ROUNDED_BOTTOM_RIGHT),
+        _ => None,
+    }
+}
+
+/// Indexed by `[up * 3 + down][left * 3 + right]`, where each arm is
+/// 0 = absent, 1 = light, 2 = heavy.
+const WEIGHTED_LINE_SYMBOLS: [[&str; 9]; 9] = [
+    ["", "╶", "╺", "╴", "─", "╼", "╸", "╾", "━"],
+    ["╷", "┌", "┍", "┐", "┬", "┮", "┑", "┭", "┯"],
+    ["╻", "┎", "┏", "┒", "┰", "┲", "┓", "┱", "┳"],
+    ["╵", "└", "┕", "┘", "┴", "┶", "┙", "┵", "┷"],
+    ["│", "├", "┝", "┤", "┼", "┾", "┥", "┽", "┿"],
+    ["╽", "┟", "┢", "┧", "╁", "╆", "┪", "╅", "╈"],
+    ["╹", "┖", "┗", "┚", "┸", "┺", "┛", "┹", "┻"],
+    ["╿", "┞", "┡", "┦", "╀", "╄", "┩", "╃", "╇"],
+    ["┃", "┠", "┣", "┨", "╂", "╊", "┫", "╉", "╋"],
+];
+
+fn weighted_line_cell_symbol(line: LineCell, weights: LineWeights) -> &'static str {
+    let present = |weight: LineWeight| {
+        (line.up && weights.up == weight)
+            || (line.down && weights.down == weight)
+            || (line.left && weights.left == weight)
+            || (line.right && weights.right == weight)
+    };
+    if present(LineWeight::Double) {
+        // Light/double mixes exist across the two axes. Otherwise, and for any
+        // heavy/double mix, the whole cell is double: every arm stays drawn
+        // and a double frame stays closed through its junctions.
+        if !present(LineWeight::Heavy) {
+            if let Some(symbol) = light_double_line_cell_symbol(line, weights) {
+                return symbol;
+            }
+        }
+        return double_line_cell_symbol(line);
+    }
+    let arm = |present: bool, weight: LineWeight| -> u8 {
+        match (present, weight) {
+            (false, _) => 0,
+            (true, LineWeight::Light) => 1,
+            (true, LineWeight::Heavy | LineWeight::Double) => 2,
+        }
+    };
+    let mut up = arm(line.up, weights.up);
+    let mut down = arm(line.down, weights.down);
+    let mut left = arm(line.left, weights.left);
+    let mut right = arm(line.right, weights.right);
+    // Like `line_cell_symbol`, a lone arm draws a full straight line.
+    match (up, down, left, right) {
+        (lone, 0, 0, 0) | (0, lone, 0, 0) => (up, down) = (lone, lone),
+        (0, 0, lone, 0) | (0, 0, 0, lone) => (left, right) = (lone, lone),
+        _ => {}
+    }
+    WEIGHTED_LINE_SYMBOLS[usize::from(up * 3 + down)][usize::from(left * 3 + right)]
+}
+
+/// Exact light/double glyph: one weight on the vertical arms, the other on
+/// the horizontal arms. `None` when an axis is missing or mixed.
+fn light_double_line_cell_symbol(line: LineCell, weights: LineWeights) -> Option<&'static str> {
+    let vertical = axis_weight(
+        line.up.then_some(weights.up),
+        line.down.then_some(weights.down),
+    )?;
+    let horizontal = axis_weight(
+        line.left.then_some(weights.left),
+        line.right.then_some(weights.right),
+    )?;
+    if vertical == horizontal {
+        return None;
+    }
+    let vertical_double = vertical == LineWeight::Double;
+    Some(
+        match (line.up, line.down, line.left, line.right, vertical_double) {
+            (false, true, false, true, false) => "╒",
+            (false, true, false, true, true) => "╓",
+            (false, true, true, false, false) => "╕",
+            (false, true, true, false, true) => "╖",
+            (true, false, false, true, false) => "╘",
+            (true, false, false, true, true) => "╙",
+            (true, false, true, false, false) => "╛",
+            (true, false, true, false, true) => "╜",
+            (true, true, false, true, false) => "╞",
+            (true, true, false, true, true) => "╟",
+            (true, true, true, false, false) => "╡",
+            (true, true, true, false, true) => "╢",
+            (false, true, true, true, false) => "╤",
+            (false, true, true, true, true) => "╥",
+            (true, false, true, true, false) => "╧",
+            (true, false, true, true, true) => "╨",
+            (true, true, true, true, false) => "╪",
+            (true, true, true, true, true) => "╫",
+            _ => return None,
+        },
+    )
+}
+
+/// Double counterpart of `line_cell_symbol`, including its lone-arm lines.
+fn double_line_cell_symbol(line: LineCell) -> &'static str {
+    use ratatui::symbols::line;
+    match (line.up, line.down, line.left, line.right) {
+        (true, true, true, true) => line::DOUBLE_CROSS,
+        (true, true, true, false) => line::DOUBLE_VERTICAL_LEFT,
+        (true, true, false, true) => line::DOUBLE_VERTICAL_RIGHT,
+        (true, false, true, true) => line::DOUBLE_HORIZONTAL_UP,
+        (false, true, true, true) => line::DOUBLE_HORIZONTAL_DOWN,
+        (true, true, false, false) | (true, false, false, false) | (false, true, false, false) => {
+            line::DOUBLE_VERTICAL
+        }
+        (false, false, true, true) | (false, false, true, false) | (false, false, false, true) => {
+            line::DOUBLE_HORIZONTAL
+        }
+        (false, true, false, true) => line::DOUBLE_TOP_LEFT,
+        (false, true, true, false) => line::DOUBLE_TOP_RIGHT,
+        (true, false, false, true) => line::DOUBLE_BOTTOM_LEFT,
+        (true, false, true, false) => line::DOUBLE_BOTTOM_RIGHT,
+        _ => "",
+    }
+}
+
 pub(crate) fn render_selection_highlight<P: PartialEq>(
     selection: Option<&crate::selection::Selection<P>>,
     buffer: &mut Buffer,
@@ -939,7 +1287,7 @@ fn color_to_rgb(color: Color) -> Option<Rgb> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::PaneBordersConfig;
+    use crate::config::{PaneBorderStyles, PaneBordersConfig};
     use crate::layout::PaneId;
     use crate::selection::Selection;
     use crate::terminal::TerminalRuntime;
@@ -1777,6 +2125,1520 @@ mod tests {
             assert_eq!(
                 automatic_selection_bg(&palette, Default::default()),
                 fallback
+            );
+        }
+    }
+
+    fn weighted_arms(symbol: &str) -> Option<[u8; 4]> {
+        let index = WEIGHTED_LINE_SYMBOLS
+            .iter()
+            .flatten()
+            .position(|candidate| !candidate.is_empty() && *candidate == symbol)?;
+        let index = u8::try_from(index).ok()?;
+        Some([index / 27, index / 9 % 3, index / 3 % 3, index % 3])
+    }
+
+    fn has_heavy_arm(symbol: &str) -> bool {
+        weighted_arms(symbol).is_some_and(|arms| arms.contains(&2))
+    }
+
+    fn buffer_rows(buffer: &Buffer) -> Vec<String> {
+        (0..buffer.area.height)
+            .map(|y| {
+                (0..buffer.area.width)
+                    .map(|x| buffer[(x, y)].symbol())
+                    .collect::<String>()
+            })
+            .collect()
+    }
+
+    /// Top-left, top-right, bottom-left, bottom-right.
+    fn border_grid() -> (Workspace, [PaneId; 4]) {
+        let mut workspace = Workspace::test_new("test");
+        let top_left = workspace.tabs[0].root_pane;
+        let top_right = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        workspace.tabs[0].layout.focus_pane(top_left);
+        let bottom_left = workspace.test_split(ratatui::layout::Direction::Vertical);
+        workspace.tabs[0].layout.focus_pane(top_right);
+        let bottom_right = workspace.test_split(ratatui::layout::Direction::Vertical);
+        (workspace, [top_left, top_right, bottom_left, bottom_right])
+    }
+
+    /// A full-height left pane beside a stacked right pair: left, top-right,
+    /// bottom-right. The divider meets the right pair's split in a T.
+    fn border_stack() -> (Workspace, [PaneId; 3]) {
+        let mut workspace = Workspace::test_new("test");
+        let left = workspace.tabs[0].root_pane;
+        let top_right = workspace.test_split(ratatui::layout::Direction::Horizontal);
+        workspace.tabs[0].layout.focus_pane(top_right);
+        let bottom_right = workspace.test_split(ratatui::layout::Direction::Vertical);
+        (workspace, [left, top_right, bottom_right])
+    }
+
+    fn border_app(
+        pane_borders: PaneBordersConfig,
+        pane_gaps: bool,
+        pane_outer_borders: bool,
+    ) -> AppState {
+        let mut app = AppState::test_new();
+        app.pane_borders = pane_borders;
+        app.pane_gaps = pane_gaps;
+        app.pane_outer_borders = pane_outer_borders;
+        app
+    }
+
+    const GAPS_AND_OUTER: [(bool, bool); 4] =
+        [(false, true), (false, false), (true, true), (true, false)];
+
+    fn style(name: &str) -> PaneBorderStyle {
+        PaneBorderStyle::parse(name).unwrap_or_else(|| panic!("style {name}"))
+    }
+
+    fn styles(all: Option<&str>, active: Option<&str>, inactive: Option<&str>) -> PaneBorderStyles {
+        PaneBorderStyles {
+            all: all.map(style),
+            active: active.map(style),
+            inactive: inactive.map(style),
+        }
+    }
+
+    fn render_layout_borders(app: &AppState, workspace: &Workspace, area: Rect) -> Buffer {
+        let layout = &workspace.tabs[0].layout;
+        let infos = apply_pane_chrome(
+            layout.panes(area),
+            app.pane_borders,
+            app.pane_gaps,
+            app.pane_outer_borders,
+        );
+        let splits = layout.splits(area);
+        let mut terminal =
+            ratatui::Terminal::new(ratatui::backend::TestBackend::new(area.width, area.height))
+                .unwrap();
+        terminal
+            .draw(|frame| render_pane_borders(app, workspace, &infos, &splits, frame))
+            .unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn render_styled(
+        app: &mut AppState,
+        workspace: &Workspace,
+        area: Rect,
+        styles: PaneBorderStyles,
+    ) -> Buffer {
+        app.pane_border_styles = styles;
+        render_layout_borders(app, workspace, area)
+    }
+
+    fn accented_line_cells(app: &AppState, buffer: &Buffer) -> Vec<(u16, u16)> {
+        cells_where(buffer, |cell| {
+            decode_glyph(cell.symbol()).is_some() && cell.style().fg == Some(app.palette.accent)
+        })
+    }
+
+    fn cells_where(
+        buffer: &Buffer,
+        keep: impl Fn(&ratatui::buffer::Cell) -> bool,
+    ) -> Vec<(u16, u16)> {
+        let mut cells = Vec::new();
+        for y in 0..buffer.area.height {
+            for x in 0..buffer.area.width {
+                if keep(&buffer[(x, y)]) {
+                    cells.push((x, y));
+                }
+            }
+        }
+        cells
+    }
+
+    fn line_cell_from_bits(bits: u8) -> LineCell {
+        LineCell {
+            up: bits & 8 != 0,
+            down: bits & 4 != 0,
+            left: bits & 2 != 0,
+            right: bits & 1 != 0,
+        }
+    }
+
+    fn uniform_weights(weight: LineWeight) -> LineWeights {
+        LineWeights {
+            up: weight,
+            down: weight,
+            left: weight,
+            right: weight,
+        }
+    }
+
+    const ALL_DASHES: [BorderDash; 3] = [BorderDash::Two, BorderDash::Three, BorderDash::Four];
+
+    /// A decoded pane glyph: arm weights (0 absent, 1 light, 2 heavy, 3 double;
+    /// up, down, left, right), dash count (0 solid) and whether it is an arc.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct Glyph {
+        arms: [u8; 4],
+        dash: u8,
+        arc: bool,
+    }
+
+    impl Glyph {
+        fn present(self) -> [bool; 4] {
+            self.arms.map(|weight| weight > 0)
+        }
+
+        /// The single weight of every present arm, or `None` when mixed.
+        fn uniform_weight(self) -> Option<u8> {
+            let mut present = self.arms.into_iter().filter(|&weight| weight > 0);
+            let first = present.next()?;
+            present.all(|weight| weight == first).then_some(first)
+        }
+
+        fn is_straight(self) -> bool {
+            matches!(
+                self.present(),
+                [true, true, false, false] | [false, false, true, true]
+            )
+        }
+
+        fn is_corner(self) -> bool {
+            matches!(
+                self.present(),
+                [false, true, false, true]
+                    | [false, true, true, false]
+                    | [true, false, false, true]
+                    | [true, false, true, false]
+            )
+        }
+    }
+
+    fn dash_count(dash: BorderDash) -> u8 {
+        match dash {
+            BorderDash::Two => 2,
+            BorderDash::Three => 3,
+            BorderDash::Four => 4,
+        }
+    }
+
+    fn weight_code(weight: LineWeight) -> u8 {
+        match weight {
+            LineWeight::Light => 1,
+            LineWeight::Heavy => 2,
+            LineWeight::Double => 3,
+        }
+    }
+
+    /// Decodes every glyph the pane border renderer can draw. Straight lines
+    /// read as two-arm lines.
+    fn decode_glyph(symbol: &str) -> Option<Glyph> {
+        if symbol.is_empty() {
+            return None;
+        }
+        let solid = |arms| {
+            Some(Glyph {
+                arms,
+                dash: 0,
+                arc: false,
+            })
+        };
+        if let Some(arms) = weighted_arms(symbol) {
+            return solid(arms);
+        }
+        for bits in (1..16u8).rev() {
+            let line = line_cell_from_bits(bits);
+            let present = [line.up, line.down, line.left, line.right];
+            if double_line_cell_symbol(line) == symbol {
+                return solid(present.map(|arm| u8::from(arm) * 3));
+            }
+            for (vertical, horizontal) in [
+                (LineWeight::Light, LineWeight::Double),
+                (LineWeight::Double, LineWeight::Light),
+            ] {
+                let weights = LineWeights {
+                    up: vertical,
+                    down: vertical,
+                    left: horizontal,
+                    right: horizontal,
+                };
+                if light_double_line_cell_symbol(line, weights) == Some(symbol) {
+                    let (v, h) = (weight_code(vertical), weight_code(horizontal));
+                    return solid([
+                        u8::from(line.up) * v,
+                        u8::from(line.down) * v,
+                        u8::from(line.left) * h,
+                        u8::from(line.right) * h,
+                    ]);
+                }
+            }
+            if arc_line_cell_symbol(line, LineWeights::default()) == Some(symbol) {
+                return Some(Glyph {
+                    arms: present.map(u8::from),
+                    dash: 0,
+                    arc: true,
+                });
+            }
+        }
+        for weight in [LineWeight::Light, LineWeight::Heavy] {
+            for dash in ALL_DASHES {
+                for bits in [12u8, 3] {
+                    let line = line_cell_from_bits(bits);
+                    if dashed_line_cell_symbol(line, uniform_weights(weight), dash) == Some(symbol)
+                    {
+                        let w = weight_code(weight);
+                        return Some(Glyph {
+                            arms: [line.up, line.down, line.left, line.right]
+                                .map(|arm| u8::from(arm) * w),
+                            dash: dash_count(dash),
+                            arc: false,
+                        });
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Unicode character names (UnicodeData.txt, checked with Perl
+    /// `charnames::viacode`) of every dashed, arc and light/double glyph.
+    fn unicode_name(symbol: &str) -> &'static str {
+        let mut chars = symbol.chars();
+        let ch = chars.next().expect("one char");
+        assert!(chars.next().is_none(), "{symbol:?} is one char");
+        match ch {
+            '\u{2504}' => "BOX DRAWINGS LIGHT TRIPLE DASH HORIZONTAL",
+            '\u{2505}' => "BOX DRAWINGS HEAVY TRIPLE DASH HORIZONTAL",
+            '\u{2506}' => "BOX DRAWINGS LIGHT TRIPLE DASH VERTICAL",
+            '\u{2507}' => "BOX DRAWINGS HEAVY TRIPLE DASH VERTICAL",
+            '\u{2508}' => "BOX DRAWINGS LIGHT QUADRUPLE DASH HORIZONTAL",
+            '\u{2509}' => "BOX DRAWINGS HEAVY QUADRUPLE DASH HORIZONTAL",
+            '\u{250A}' => "BOX DRAWINGS LIGHT QUADRUPLE DASH VERTICAL",
+            '\u{250B}' => "BOX DRAWINGS HEAVY QUADRUPLE DASH VERTICAL",
+            '\u{254C}' => "BOX DRAWINGS LIGHT DOUBLE DASH HORIZONTAL",
+            '\u{254D}' => "BOX DRAWINGS HEAVY DOUBLE DASH HORIZONTAL",
+            '\u{254E}' => "BOX DRAWINGS LIGHT DOUBLE DASH VERTICAL",
+            '\u{254F}' => "BOX DRAWINGS HEAVY DOUBLE DASH VERTICAL",
+            '\u{2552}' => "BOX DRAWINGS DOWN SINGLE AND RIGHT DOUBLE",
+            '\u{2553}' => "BOX DRAWINGS DOWN DOUBLE AND RIGHT SINGLE",
+            '\u{2555}' => "BOX DRAWINGS DOWN SINGLE AND LEFT DOUBLE",
+            '\u{2556}' => "BOX DRAWINGS DOWN DOUBLE AND LEFT SINGLE",
+            '\u{2558}' => "BOX DRAWINGS UP SINGLE AND RIGHT DOUBLE",
+            '\u{2559}' => "BOX DRAWINGS UP DOUBLE AND RIGHT SINGLE",
+            '\u{255B}' => "BOX DRAWINGS UP SINGLE AND LEFT DOUBLE",
+            '\u{255C}' => "BOX DRAWINGS UP DOUBLE AND LEFT SINGLE",
+            '\u{255E}' => "BOX DRAWINGS VERTICAL SINGLE AND RIGHT DOUBLE",
+            '\u{255F}' => "BOX DRAWINGS VERTICAL DOUBLE AND RIGHT SINGLE",
+            '\u{2561}' => "BOX DRAWINGS VERTICAL SINGLE AND LEFT DOUBLE",
+            '\u{2562}' => "BOX DRAWINGS VERTICAL DOUBLE AND LEFT SINGLE",
+            '\u{2564}' => "BOX DRAWINGS DOWN SINGLE AND HORIZONTAL DOUBLE",
+            '\u{2565}' => "BOX DRAWINGS DOWN DOUBLE AND HORIZONTAL SINGLE",
+            '\u{2567}' => "BOX DRAWINGS UP SINGLE AND HORIZONTAL DOUBLE",
+            '\u{2568}' => "BOX DRAWINGS UP DOUBLE AND HORIZONTAL SINGLE",
+            '\u{256A}' => "BOX DRAWINGS VERTICAL SINGLE AND HORIZONTAL DOUBLE",
+            '\u{256B}' => "BOX DRAWINGS VERTICAL DOUBLE AND HORIZONTAL SINGLE",
+            '\u{256D}' => "BOX DRAWINGS LIGHT ARC DOWN AND RIGHT",
+            '\u{256E}' => "BOX DRAWINGS LIGHT ARC DOWN AND LEFT",
+            '\u{256F}' => "BOX DRAWINGS LIGHT ARC UP AND LEFT",
+            '\u{2570}' => "BOX DRAWINGS LIGHT ARC UP AND RIGHT",
+            other => panic!(
+                "no name recorded for {other:?} (U+{:04X})",
+                u32::from(other)
+            ),
+        }
+    }
+
+    #[test]
+    fn pane_border_style_glyphs_match_unicode_character_names() {
+        // Dashed straight runs, for two-arm and lone-arm cells.
+        for (weight, weight_name) in [(LineWeight::Light, "LIGHT"), (LineWeight::Heavy, "HEAVY")] {
+            for (dash, dash_name) in [
+                (BorderDash::Two, "DOUBLE"),
+                (BorderDash::Three, "TRIPLE"),
+                (BorderDash::Four, "QUADRUPLE"),
+            ] {
+                for (bits, axis) in [
+                    (12u8, "VERTICAL"),
+                    (8, "VERTICAL"),
+                    (4, "VERTICAL"),
+                    (3, "HORIZONTAL"),
+                    (2, "HORIZONTAL"),
+                    (1, "HORIZONTAL"),
+                ] {
+                    let symbol = dashed_line_cell_symbol(
+                        line_cell_from_bits(bits),
+                        uniform_weights(weight),
+                        dash,
+                    )
+                    .expect("straight runs dash");
+                    assert_eq!(
+                        unicode_name(symbol),
+                        format!("BOX DRAWINGS {weight_name} {dash_name} DASH {axis}"),
+                        "bits={bits}"
+                    );
+                }
+            }
+        }
+        // Arcs: both arms light.
+        for (bits, vertical, horizontal) in [
+            (5u8, "DOWN", "RIGHT"),
+            (6, "DOWN", "LEFT"),
+            (9, "UP", "RIGHT"),
+            (10, "UP", "LEFT"),
+        ] {
+            let symbol = arc_line_cell_symbol(line_cell_from_bits(bits), LineWeights::default())
+                .expect("light corner arcs");
+            assert_eq!(
+                unicode_name(symbol),
+                format!("BOX DRAWINGS LIGHT ARC {vertical} AND {horizontal}")
+            );
+        }
+        // Light/double mixes: one weight per axis.
+        let mut light_double = 0;
+        for bits in 1..16u8 {
+            let line = line_cell_from_bits(bits);
+            let vertical = match (line.up, line.down) {
+                (true, true) => "VERTICAL",
+                (true, false) => "UP",
+                (false, true) => "DOWN",
+                (false, false) => continue,
+            };
+            let horizontal = match (line.left, line.right) {
+                (true, true) => "HORIZONTAL",
+                (true, false) => "LEFT",
+                (false, true) => "RIGHT",
+                (false, false) => continue,
+            };
+            for (v, h, v_name, h_name) in [
+                (LineWeight::Light, LineWeight::Double, "SINGLE", "DOUBLE"),
+                (LineWeight::Double, LineWeight::Light, "DOUBLE", "SINGLE"),
+            ] {
+                let symbol = weighted_line_cell_symbol(
+                    line,
+                    LineWeights {
+                        up: v,
+                        down: v,
+                        left: h,
+                        right: h,
+                    },
+                );
+                assert_eq!(
+                    unicode_name(symbol),
+                    format!("BOX DRAWINGS {vertical} {v_name} AND {horizontal} {h_name}")
+                );
+                light_double += 1;
+            }
+        }
+        assert_eq!(light_double, 18);
+        // The dashed and arc glyphs are ratatui's own constants.
+        use ratatui::symbols::line;
+        assert_eq!(
+            dashed_line_cell_symbol(
+                line_cell_from_bits(3),
+                uniform_weights(LineWeight::Heavy),
+                BorderDash::Two
+            ),
+            Some(line::HEAVY_DOUBLE_DASH_HORIZONTAL)
+        );
+        assert_eq!(
+            arc_line_cell_symbol(line_cell_from_bits(5), LineWeights::default()),
+            Some(line::ROUNDED_TOP_LEFT)
+        );
+    }
+
+    #[test]
+    fn pane_border_style_light_heavy_table_matches_light_family() {
+        for bits in 0..16u8 {
+            let line = line_cell_from_bits(bits);
+            assert_eq!(
+                weighted_line_cell_symbol(line, LineWeights::default()),
+                line_cell_symbol(line)
+            );
+            let heavy_symbol = weighted_line_cell_symbol(line, uniform_weights(LineWeight::Heavy));
+            let light_arms = weighted_arms(line_cell_symbol(line));
+            assert_eq!(
+                weighted_arms(heavy_symbol),
+                light_arms.map(|arms| arms.map(|weight| weight * 2))
+            );
+        }
+        let mut glyphs: Vec<&str> = WEIGHTED_LINE_SYMBOLS.iter().flatten().copied().collect();
+        assert_eq!(glyphs.remove(0), "");
+        glyphs.sort_unstable();
+        glyphs.dedup();
+        assert_eq!(glyphs.len(), 80);
+        let weights = LineWeights {
+            right: LineWeight::Heavy,
+            ..LineWeights::default()
+        };
+        assert_eq!(
+            weighted_line_cell_symbol(line_cell_from_bits(13), weights),
+            "┝"
+        );
+        let weights = LineWeights {
+            up: LineWeight::Heavy,
+            ..LineWeights::default()
+        };
+        assert_eq!(
+            weighted_line_cell_symbol(line_cell_from_bits(8), weights),
+            "┃"
+        );
+    }
+
+    #[test]
+    fn pane_border_style_double_mixes_follow_unicode_coverage() {
+        for bits in 1..16u8 {
+            let line = line_cell_from_bits(bits);
+            let double = double_line_cell_symbol(line);
+            let light_arms = decode_glyph(line_cell_symbol(line)).unwrap().present();
+            assert_eq!(
+                decode_glyph(double).unwrap().present(),
+                light_arms,
+                "bits={bits}"
+            );
+            assert_eq!(decode_glyph(double).unwrap().uniform_weight(), Some(3));
+            for arm in 0..4 {
+                for base in [LineWeight::Heavy, LineWeight::Light] {
+                    let mut weights = uniform_weights(base);
+                    let present = match arm {
+                        0 => {
+                            weights.up = LineWeight::Double;
+                            line.up
+                        }
+                        1 => {
+                            weights.down = LineWeight::Double;
+                            line.down
+                        }
+                        2 => {
+                            weights.left = LineWeight::Double;
+                            line.left
+                        }
+                        _ => {
+                            weights.right = LineWeight::Double;
+                            line.right
+                        }
+                    };
+                    let symbol = weighted_line_cell_symbol(line, weights);
+                    let glyph = decode_glyph(symbol).unwrap();
+                    assert_eq!(glyph.present(), light_arms, "bits={bits} {weights:?}");
+                    if !present {
+                        // A double weight on an absent arm changes nothing.
+                        assert_eq!(
+                            symbol,
+                            weighted_line_cell_symbol(line, uniform_weights(base))
+                        );
+                    } else if base == LineWeight::Heavy {
+                        // GW1 rule: heavy and double never mix, the cell is double.
+                        assert_eq!(symbol, double, "bits={bits} {weights:?}");
+                    } else {
+                        // Light and double: the exact glyph where the double arm
+                        // is the only arm on its axis, else the whole cell double.
+                        let arms = [line.up, line.down, line.left, line.right];
+                        let axis = if arm < 2 {
+                            [arms[0], arms[1]]
+                        } else {
+                            [arms[2], arms[3]]
+                        };
+                        let other_axis = if arm < 2 {
+                            [arms[2], arms[3]]
+                        } else {
+                            [arms[0], arms[1]]
+                        };
+                        let alone_on_axis = axis.iter().filter(|&&a| a).count() == 1;
+                        if alone_on_axis && other_axis.contains(&true) {
+                            let mut expected = arms.map(u8::from);
+                            expected[arm] = 3;
+                            assert_eq!(glyph.arms, expected, "bits={bits} {symbol}");
+                        } else {
+                            assert_eq!(symbol, double, "bits={bits} {weights:?}");
+                        }
+                    }
+                }
+            }
+        }
+        // A focused frame corner meeting a heavy neighbor divider: `╦`, not `┳`.
+        let mut weights = uniform_weights(LineWeight::Heavy);
+        weights.down = LineWeight::Double;
+        weights.left = LineWeight::Double;
+        assert_eq!(
+            weighted_line_cell_symbol(line_cell_from_bits(7), weights),
+            "╦"
+        );
+        // A double focused divider beside a light neighbor: `╟`; reversed: `╞`.
+        let mut weights = uniform_weights(LineWeight::Double);
+        weights.right = LineWeight::Light;
+        assert_eq!(
+            weighted_line_cell_symbol(line_cell_from_bits(13), weights),
+            "╟"
+        );
+        let mut weights = uniform_weights(LineWeight::Light);
+        weights.right = LineWeight::Double;
+        assert_eq!(
+            weighted_line_cell_symbol(line_cell_from_bits(13), weights),
+            "╞"
+        );
+    }
+
+    #[test]
+    fn pane_border_glyphs_characterize_shared_and_gapped_grids() {
+        let (workspace, _) = border_grid();
+        let area = Rect::new(0, 0, 12, 6);
+        let shared = render_layout_borders(
+            &border_app(PaneBordersConfig::Auto, false, true),
+            &workspace,
+            area,
+        );
+        assert_eq!(
+            buffer_rows(&shared),
+            vec![
+                "┌─────┬────┐",
+                "│     │    │",
+                "│     │    │",
+                "├─────┼────┤",
+                "│     │    │",
+                "└─────┴────┘",
+            ]
+        );
+        let gapped = render_layout_borders(
+            &border_app(PaneBordersConfig::Auto, true, true),
+            &workspace,
+            area,
+        );
+        assert_eq!(
+            buffer_rows(&gapped),
+            vec![
+                "┌────┐┌────┐",
+                "│    ││    │",
+                "└────┘└────┘",
+                "┌────┐┌────┐",
+                "│    ││    │",
+                "└────┘└────┘",
+            ]
+        );
+    }
+
+    /// Small and large layouts, including frames too narrow to have a segment.
+    const MATRIX_AREAS: [Rect; 5] = [
+        Rect::new(0, 0, 3, 3),
+        Rect::new(0, 0, 4, 4),
+        Rect::new(0, 0, 5, 3),
+        Rect::new(0, 0, 12, 6),
+        Rect::new(0, 0, 40, 12),
+    ];
+
+    /// Every layout of the matrix tests: both workspaces, every focus.
+    fn matrix_layouts() -> Vec<Workspace> {
+        let mut layouts = Vec::new();
+        for index in 0..4 {
+            let (mut workspace, panes) = border_grid();
+            workspace.tabs[0].layout.focus_pane(panes[index]);
+            layouts.push(workspace);
+        }
+        for index in 0..3 {
+            let (mut workspace, panes) = border_stack();
+            workspace.tabs[0].layout.focus_pane(panes[index]);
+            layouts.push(workspace);
+        }
+        layouts
+    }
+
+    #[test]
+    fn pane_border_styles_unset_and_explicit_light_match_stock_buffers() {
+        for workspace in matrix_layouts() {
+            for (gaps, outer) in GAPS_AND_OUTER {
+                for area in MATRIX_AREAS {
+                    let mut app = border_app(PaneBordersConfig::Auto, gaps, outer);
+                    assert_eq!(app.pane_border_styles, PaneBorderStyles::default());
+                    let stock = render_layout_borders(&app, &workspace, area);
+                    for explicit in [
+                        styles(Some("light"), None, None),
+                        styles(None, Some("light"), None),
+                        styles(None, None, Some("light")),
+                        styles(Some("light"), Some("light"), Some("light")),
+                    ] {
+                        let rendered = render_styled(&mut app, &workspace, area, explicit);
+                        assert_eq!(rendered, stock, "{explicit:?} gaps={gaps} outer={outer}");
+                    }
+                }
+            }
+        }
+    }
+
+    /// Reference weighted glyph rule (per-arm light/heavy/double, any double arm
+    /// draws the cell double), kept as an independent oracle for the heavy and double styles.
+    fn reference_weighted_line_cell_symbol(line: LineCell, weights: LineWeights) -> &'static str {
+        let double = (line.up && weights.up == LineWeight::Double)
+            || (line.down && weights.down == LineWeight::Double)
+            || (line.left && weights.left == LineWeight::Double)
+            || (line.right && weights.right == LineWeight::Double);
+        if double {
+            return match (line.up, line.down, line.left, line.right) {
+                (true, true, true, true) => "╬",
+                (true, true, true, false) => "╣",
+                (true, true, false, true) => "╠",
+                (true, false, true, true) => "╩",
+                (false, true, true, true) => "╦",
+                (true, true, false, false)
+                | (true, false, false, false)
+                | (false, true, false, false) => "║",
+                (false, false, true, true)
+                | (false, false, true, false)
+                | (false, false, false, true) => "═",
+                (false, true, false, true) => "╔",
+                (false, true, true, false) => "╗",
+                (true, false, false, true) => "╚",
+                (true, false, true, false) => "╝",
+                _ => "",
+            };
+        }
+        let arm = |present: bool, weight: LineWeight| -> u8 {
+            match (present, weight) {
+                (false, _) => 0,
+                (true, LineWeight::Light) => 1,
+                (true, LineWeight::Heavy | LineWeight::Double) => 2,
+            }
+        };
+        let mut up = arm(line.up, weights.up);
+        let mut down = arm(line.down, weights.down);
+        let mut left = arm(line.left, weights.left);
+        let mut right = arm(line.right, weights.right);
+        match (up, down, left, right) {
+            (lone, 0, 0, 0) | (0, lone, 0, 0) => (up, down) = (lone, lone),
+            (0, 0, lone, 0) | (0, 0, 0, lone) => (left, right) = (lone, lone),
+            _ => {}
+        }
+        WEIGHTED_LINE_SYMBOLS[usize::from(up * 3 + down)][usize::from(left * 3 + right)]
+    }
+
+    /// Reference render for the heavy/double style cases:
+    /// the stock buffer with each border cell's symbol chosen by the reference rule.
+    fn reference_render(
+        app: &mut AppState,
+        workspace: &Workspace,
+        area: Rect,
+        focus_weight: bool,
+        heavy: bool,
+    ) -> Buffer {
+        let mut buffer = render_styled(app, workspace, area, PaneBorderStyles::default());
+        if !app.pane_borders.draws_borders() {
+            return buffer;
+        }
+        let layout = &workspace.tabs[0].layout;
+        let infos = apply_pane_chrome(
+            layout.panes(area),
+            app.pane_borders,
+            app.pane_gaps,
+            app.pane_outer_borders,
+        );
+        let mut cells = std::collections::HashMap::<(u16, u16), LineCell>::new();
+        for info in &infos {
+            add_pane_border_cells(&mut cells, info);
+        }
+        add_split_border_cells(app.pane_gaps, &layout.splits(area), &mut cells);
+        let frame = if focus_weight {
+            infos
+                .iter()
+                .find(|info| info.is_focused)
+                .and_then(|info| FocusFrame::of(info, app.pane_gaps))
+        } else {
+            None
+        };
+        let weight = |owned: bool, base: LineWeight, emphasis: LineWeight| {
+            if owned {
+                emphasis
+            } else {
+                base
+            }
+        };
+        for ((x, y), line) in cells {
+            if x >= area.width
+                || y >= area.height
+                || buffer[(x, y)].symbol() != line_cell_symbol(line)
+            {
+                // Out of view, or a title glyph painted over the border.
+                continue;
+            }
+            let (base, emphasis) = if heavy {
+                (LineWeight::Heavy, LineWeight::Double)
+            } else {
+                (LineWeight::Light, LineWeight::Heavy)
+            };
+            let symbol = match frame {
+                Some(frame) => {
+                    let owned = frame.owned_arms(x, y);
+                    reference_weighted_line_cell_symbol(
+                        line,
+                        LineWeights {
+                            up: weight(owned.up, base, emphasis),
+                            down: weight(owned.down, base, emphasis),
+                            left: weight(owned.left, base, emphasis),
+                            right: weight(owned.right, base, emphasis),
+                        },
+                    )
+                }
+                None if heavy => {
+                    reference_weighted_line_cell_symbol(line, uniform_weights(LineWeight::Heavy))
+                }
+                None => line_cell_symbol(line),
+            };
+            if !symbol.is_empty() {
+                buffer[(x, y)].set_symbol(symbol);
+            }
+        }
+        buffer
+    }
+
+    #[test]
+    fn pane_border_styles_heavy_and_double_match_reference_weighted_rule() {
+        // (focused frame heavy, every frame heavy) -> the style keys.
+        let mappings = [
+            (true, false, styles(None, Some("heavy"), None)),
+            (false, true, styles(Some("heavy"), None, None)),
+            (true, true, styles(Some("heavy"), Some("double"), None)),
+        ];
+        let mut compared = 0;
+        for palette in [Palette::catppuccin(), Palette::catppuccin_latte()] {
+            for pane_borders in [PaneBordersConfig::Auto, PaneBordersConfig::Always] {
+                for workspace in matrix_layouts()
+                    .into_iter()
+                    .chain([Workspace::test_new("lone")])
+                {
+                    for (gaps, outer) in GAPS_AND_OUTER {
+                        for area in MATRIX_AREAS {
+                            for (focus_weight, heavy, new_keys) in mappings {
+                                let mut app = border_app(pane_borders, gaps, outer);
+                                app.palette = palette.clone();
+                                let old = reference_render(
+                                    &mut app,
+                                    &workspace,
+                                    area,
+                                    focus_weight,
+                                    heavy,
+                                );
+                                let new = render_styled(&mut app, &workspace, area, new_keys);
+                                assert_eq!(
+                                    new, old,
+                                    "focus_weight={focus_weight} heavy={heavy} gaps={gaps} outer={outer} area={area:?}"
+                                );
+                                compared += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(compared, 2 * 2 * 8 * 4 * 5 * 3);
+    }
+
+    #[test]
+    fn pane_border_style_active_heavy_matches_old_focus_weight_buffers() {
+        let (mut workspace, [top_left, _, _, bottom_right]) = border_grid();
+        let area = Rect::new(0, 0, 12, 6);
+        let active_heavy = styles(None, Some("heavy"), None);
+        let mut app = border_app(PaneBordersConfig::Auto, false, true);
+
+        workspace.tabs[0].layout.focus_pane(top_left);
+        let emphasized = render_styled(&mut app, &workspace, area, active_heavy);
+        assert_eq!(
+            buffer_rows(&emphasized),
+            vec![
+                "┏━━━━━┱────┐",
+                "┃     ┃    │",
+                "┃     ┃    │",
+                "┡━━━━━╃────┤",
+                "│     │    │",
+                "└─────┴────┘",
+            ]
+        );
+        assert_eq!(
+            cells_where(&emphasized, |c| has_heavy_arm(c.symbol())),
+            accented_line_cells(&app, &emphasized)
+        );
+
+        // Moving focus moves the cue; the previous frame returns to light.
+        workspace.tabs[0].layout.focus_pane(bottom_right);
+        let emphasized = render_styled(&mut app, &workspace, area, active_heavy);
+        assert_eq!(
+            buffer_rows(&emphasized),
+            vec![
+                "┌─────┬────┐",
+                "│     │    │",
+                "│     │    │",
+                "├─────╆━━━━┪",
+                "│     ┃    ┃",
+                "└─────┺━━━━┛",
+            ]
+        );
+
+        // Separate frames, outer edges on and off.
+        workspace.tabs[0].layout.focus_pane(top_left);
+        let mut app = border_app(PaneBordersConfig::Auto, true, true);
+        assert_eq!(
+            buffer_rows(&render_styled(&mut app, &workspace, area, active_heavy)),
+            vec![
+                "┏━━━━┓┌────┐",
+                "┃    ┃│    │",
+                "┗━━━━┛└────┘",
+                "┌────┐┌────┐",
+                "│    ││    │",
+                "└────┘└────┘",
+            ]
+        );
+        let mut app = border_app(PaneBordersConfig::Auto, true, false);
+        assert_eq!(
+            buffer_rows(&render_styled(&mut app, &workspace, area, active_heavy)),
+            vec![
+                "     ┃│     ",
+                "     ┃│     ",
+                "━━━━━┛└─────",
+                "─────┐┌─────",
+                "     ││     ",
+                "     ││     ",
+            ]
+        );
+        // Shared dividers without outer edges.
+        let mut app = border_app(PaneBordersConfig::Auto, false, false);
+        assert_eq!(
+            buffer_rows(&render_styled(&mut app, &workspace, area, active_heavy)),
+            vec![
+                "      ┃     ",
+                "      ┃     ",
+                "      ┃     ",
+                "━━━━━━╃─────",
+                "      │     ",
+                "      │     ",
+            ]
+        );
+        // A lone pane framed by `always`.
+        let lone = Workspace::test_new("test");
+        let mut app = border_app(PaneBordersConfig::Always, false, true);
+        assert_eq!(
+            buffer_rows(&render_styled(
+                &mut app,
+                &lone,
+                Rect::new(0, 0, 6, 3),
+                active_heavy
+            )),
+            vec!["┏━━━━┓", "┃    ┃", "┗━━━━┛"]
+        );
+    }
+
+    #[test]
+    fn pane_border_style_heavy_matches_old_heavy_borders_buffers() {
+        let (mut workspace, [top_left, _, _, bottom_right]) = border_grid();
+        workspace.tabs[0].layout.focus_pane(top_left);
+        let area = Rect::new(0, 0, 12, 6);
+        let all_heavy = styles(Some("heavy"), None, None);
+        for (gaps, outer, expected) in [
+            (
+                false,
+                true,
+                [
+                    "┏━━━━━┳━━━━┓",
+                    "┃     ┃    ┃",
+                    "┃     ┃    ┃",
+                    "┣━━━━━╋━━━━┫",
+                    "┃     ┃    ┃",
+                    "┗━━━━━┻━━━━┛",
+                ],
+            ),
+            (
+                false,
+                false,
+                [
+                    "      ┃     ",
+                    "      ┃     ",
+                    "      ┃     ",
+                    "━━━━━━╋━━━━━",
+                    "      ┃     ",
+                    "      ┃     ",
+                ],
+            ),
+            (
+                true,
+                true,
+                [
+                    "┏━━━━┓┏━━━━┓",
+                    "┃    ┃┃    ┃",
+                    "┗━━━━┛┗━━━━┛",
+                    "┏━━━━┓┏━━━━┓",
+                    "┃    ┃┃    ┃",
+                    "┗━━━━┛┗━━━━┛",
+                ],
+            ),
+            (
+                true,
+                false,
+                [
+                    "     ┃┃     ",
+                    "     ┃┃     ",
+                    "━━━━━┛┗━━━━━",
+                    "━━━━━┓┏━━━━━",
+                    "     ┃┃     ",
+                    "     ┃┃     ",
+                ],
+            ),
+        ] {
+            let mut app = border_app(PaneBordersConfig::Auto, gaps, outer);
+            let plain = render_layout_borders(&app, &workspace, area);
+            let heavy = render_styled(&mut app, &workspace, area, all_heavy);
+            assert_eq!(buffer_rows(&heavy), expected, "gaps={gaps} outer={outer}");
+            // The accent color alone still marks focus.
+            assert!(!accented_line_cells(&app, &heavy).is_empty());
+            assert_eq!(
+                accented_line_cells(&app, &heavy),
+                accented_line_cells(&app, &plain)
+            );
+        }
+
+        // Heavy everywhere plus a double focused frame (the old combination).
+        let heavy_double = styles(Some("heavy"), Some("double"), None);
+        let mut app = border_app(PaneBordersConfig::Auto, false, true);
+        for (focused, expected) in [
+            (
+                top_left,
+                [
+                    "╔═════╦━━━━┓",
+                    "║     ║    ┃",
+                    "║     ║    ┃",
+                    "╠═════╬━━━━┫",
+                    "┃     ┃    ┃",
+                    "┗━━━━━┻━━━━┛",
+                ],
+            ),
+            (
+                bottom_right,
+                [
+                    "┏━━━━━┳━━━━┓",
+                    "┃     ┃    ┃",
+                    "┃     ┃    ┃",
+                    "┣━━━━━╬════╣",
+                    "┃     ║    ║",
+                    "┗━━━━━╩════╝",
+                ],
+            ),
+        ] {
+            workspace.tabs[0].layout.focus_pane(focused);
+            let plain = render_layout_borders(&app, &workspace, area);
+            let both = render_styled(&mut app, &workspace, area, heavy_double);
+            assert_eq!(buffer_rows(&both), expected);
+            let double = cells_where(&both, |c| {
+                decode_glyph(c.symbol()).and_then(Glyph::uniform_weight) == Some(3)
+            });
+            assert_eq!(double, accented_line_cells(&app, &plain));
+        }
+
+        let lone = Workspace::test_new("test");
+        let mut app = border_app(PaneBordersConfig::Always, false, true);
+        let lone_area = Rect::new(0, 0, 6, 3);
+        assert_eq!(
+            buffer_rows(&render_styled(&mut app, &lone, lone_area, all_heavy)),
+            vec!["┏━━━━┓", "┃    ┃", "┗━━━━┛"]
+        );
+        assert_eq!(
+            buffer_rows(&render_styled(&mut app, &lone, lone_area, heavy_double)),
+            vec!["╔════╗", "║    ║", "╚════╝"]
+        );
+        // `auto` leaves a lone pane unframed whatever the style.
+        let mut app = border_app(PaneBordersConfig::Auto, false, true);
+        let plain = render_layout_borders(&app, &lone, lone_area);
+        assert_eq!(
+            render_styled(&mut app, &lone, lone_area, heavy_double),
+            plain
+        );
+    }
+
+    #[test]
+    fn pane_border_styles_keep_focused_title_text_and_bold() {
+        let mut workspace = Workspace::test_new("test");
+        let left = workspace.tabs[0].root_pane;
+        workspace.test_split(ratatui::layout::Direction::Horizontal);
+        workspace.tabs[0].layout.focus_pane(left);
+        let mut app = border_app(PaneBordersConfig::Auto, false, true);
+        let terminal_id = workspace.tabs[0].panes[&left].attached_terminal_id.clone();
+        let mut terminal_state = TerminalState::new(terminal_id.clone(), "/tmp".into());
+        terminal_state.set_manual_label("api".into());
+        app.terminals.insert(terminal_id, terminal_state);
+        let area = Rect::new(0, 0, 20, 4);
+
+        for (keys, expected) in [
+            (
+                styles(None, Some("heavy"), None),
+                [
+                    "┏ api ━━━━┱────────┐",
+                    "┃         ┃        │",
+                    "┃         ┃        │",
+                    "┗━━━━━━━━━┹────────┘",
+                ],
+            ),
+            (
+                styles(Some("heavy"), None, None),
+                [
+                    "┏ api ━━━━┳━━━━━━━━┓",
+                    "┃         ┃        ┃",
+                    "┃         ┃        ┃",
+                    "┗━━━━━━━━━┻━━━━━━━━┛",
+                ],
+            ),
+            (
+                styles(Some("heavy"), Some("double"), None),
+                [
+                    "╔ api ════╦━━━━━━━━┓",
+                    "║         ║        ┃",
+                    "║         ║        ┃",
+                    "╚═════════╩━━━━━━━━┛",
+                ],
+            ),
+            (
+                styles(None, Some("light-dashed-3"), Some("rounded")),
+                [
+                    "┌ api ┄┄┄┄┬────────╮",
+                    "┆         ┆        │",
+                    "┆         ┆        │",
+                    "└┄┄┄┄┄┄┄┄┄┴────────╯",
+                ],
+            ),
+        ] {
+            let buffer = render_styled(&mut app, &workspace, area, keys);
+            assert_eq!(buffer_rows(&buffer), expected, "{keys:?}");
+            let title = &buffer[(2, 0)];
+            assert_eq!(title.symbol(), "a");
+            assert_eq!(title.style().fg, Some(app.palette.accent));
+            assert!(title.style().add_modifier.contains(Modifier::BOLD));
+        }
+    }
+
+    /// Asserts the styled buffer keeps the stock render's cells, styles and arm
+    /// presence, that every arm meets its neighbor, and that dashes and arcs
+    /// sit only where the rules allow. Returns the decoded glyphs.
+    fn assert_connected_glyph_only_change(stock: &Buffer, styled: &Buffer, context: &str) {
+        assert_eq!(stock.area, styled.area, "{context}");
+        let area = stock.area;
+        for y in 0..area.height {
+            for x in 0..area.width {
+                let (before, after) = (&stock[(x, y)], &styled[(x, y)]);
+                assert_eq!(
+                    before.style(),
+                    after.style(),
+                    "{context}: style at ({x}, {y})"
+                );
+                let Some(stock_glyph) = decode_glyph(before.symbol()) else {
+                    assert_eq!(
+                        before.symbol(),
+                        after.symbol(),
+                        "{context}: stray cell at ({x}, {y})"
+                    );
+                    continue;
+                };
+                let glyph = decode_glyph(after.symbol()).unwrap_or_else(|| {
+                    panic!(
+                        "{context}: unknown glyph {:?} at ({x}, {y})",
+                        after.symbol()
+                    )
+                });
+                assert_eq!(
+                    glyph.present(),
+                    stock_glyph.present(),
+                    "{context}: arms at ({x}, {y})"
+                );
+                if glyph.dash > 0 {
+                    assert!(
+                        glyph.is_straight(),
+                        "{context}: dashed junction at ({x}, {y})"
+                    );
+                }
+                if glyph.arc {
+                    assert!(
+                        glyph.is_corner() && glyph.uniform_weight() == Some(1),
+                        "{context}: arc at ({x}, {y})"
+                    );
+                }
+                // Every arm meets the matching arm of a neighboring line glyph.
+                let neighbors = [
+                    (y.checked_sub(1).map(|y| (x, y)), 0, 1),
+                    ((y + 1 < area.height).then_some((x, y + 1)), 1, 0),
+                    (x.checked_sub(1).map(|x| (x, y)), 2, 3),
+                    ((x + 1 < area.width).then_some((x + 1, y)), 3, 2),
+                ];
+                for (neighbor, arm, opposite) in neighbors {
+                    let Some(neighbor) = neighbor else { continue };
+                    let Some(other) = decode_glyph(styled[neighbor].symbol()) else {
+                        continue;
+                    };
+                    let other_stock = decode_glyph(stock[neighbor].symbol()).unwrap();
+                    if stock_glyph.present()[arm] && other_stock.present()[opposite] {
+                        assert!(
+                            glyph.present()[arm] && other.present()[opposite],
+                            "{context}: broken segment ({x}, {y}) -> {neighbor:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// The renderer's merged border arms (before glyph selection).
+    fn border_line_cells(
+        app: &AppState,
+        workspace: &Workspace,
+        area: Rect,
+    ) -> std::collections::HashMap<(u16, u16), LineCell> {
+        let layout = &workspace.tabs[0].layout;
+        let infos = apply_pane_chrome(
+            layout.panes(area),
+            app.pane_borders,
+            app.pane_gaps,
+            app.pane_outer_borders,
+        );
+        let mut cells = std::collections::HashMap::new();
+        for info in &infos {
+            add_pane_border_cells(&mut cells, info);
+        }
+        add_split_border_cells(app.pane_gaps, &layout.splits(area), &mut cells);
+        cells
+    }
+
+    /// Line cells with a present arm on the focused frame; each is accented.
+    fn focus_owned_cells(app: &AppState, workspace: &Workspace, stock: &Buffer) -> Vec<(u16, u16)> {
+        let area = stock.area;
+        let infos = apply_pane_chrome(
+            workspace.tabs[0].layout.panes(area),
+            app.pane_borders,
+            app.pane_gaps,
+            app.pane_outer_borders,
+        );
+        let Some(frame) = infos
+            .iter()
+            .find(|info| info.is_focused)
+            .and_then(|info| FocusFrame::of(info, app.pane_gaps))
+        else {
+            return Vec::new();
+        };
+        let accented = accented_line_cells(app, stock);
+        let lines = border_line_cells(app, workspace, area);
+        cells_where(stock, |cell| decode_glyph(cell.symbol()).is_some())
+            .into_iter()
+            .filter(|&(x, y)| {
+                let Some(line) = lines.get(&(x, y)) else {
+                    return false;
+                };
+                let owned = frame.owned_arms(x, y);
+                let on_frame = (line.up && owned.up)
+                    || (line.down && owned.down)
+                    || (line.left && owned.left)
+                    || (line.right && owned.right);
+                assert!(
+                    !on_frame || accented.contains(&(x, y)),
+                    "focus-owned cell ({x}, {y}) is accented"
+                );
+                on_frame
+            })
+            .collect()
+    }
+
+    #[test]
+    fn pane_border_styles_every_style_state_layout_and_focus_stay_connected() {
+        let mut renders = 0;
+        for (name, chosen) in PaneBorderStyle::NAMES {
+            let line_style = LineStyle::of(chosen);
+            for (state, keys) in [
+                ("all", styles(Some(name), None, None)),
+                ("active", styles(None, Some(name), None)),
+                ("inactive", styles(None, None, Some(name))),
+            ] {
+                for workspace in matrix_layouts() {
+                    for (gaps, outer) in GAPS_AND_OUTER {
+                        for area in MATRIX_AREAS {
+                            let context =
+                                format!("{name} {state} gaps={gaps} outer={outer} area={area:?}");
+                            let mut app = border_app(PaneBordersConfig::Auto, gaps, outer);
+                            let stock = render_layout_borders(&app, &workspace, area);
+                            let styled = render_styled(&mut app, &workspace, area, keys);
+                            assert_connected_glyph_only_change(&stock, &styled, &context);
+                            renders += 1;
+                            let owned = focus_owned_cells(&app, &workspace, &stock);
+                            for y in 0..area.height {
+                                for x in 0..area.width {
+                                    let Some(glyph) = decode_glyph(styled[(x, y)].symbol()) else {
+                                        continue;
+                                    };
+                                    let on_focus = owned.contains(&(x, y));
+                                    let styled_here = match state {
+                                        "all" => true,
+                                        "active" => on_focus,
+                                        _ => !on_focus,
+                                    };
+                                    let weight = weight_code(line_style.weight);
+                                    if state == "all" {
+                                        // One style everywhere: uniform weight per cell.
+                                        assert_eq!(
+                                            glyph.uniform_weight(),
+                                            Some(weight),
+                                            "{context} ({x}, {y})"
+                                        );
+                                    }
+                                    if !styled_here && state == "active" {
+                                        // Unfocused cells stay stock.
+                                        assert_eq!(
+                                            styled[(x, y)].symbol(),
+                                            stock[(x, y)].symbol(),
+                                            "{context} ({x}, {y})"
+                                        );
+                                    }
+                                    if styled_here && glyph.uniform_weight() == Some(weight) {
+                                        let dash = line_style.dash.map_or(0, dash_count);
+                                        if glyph.is_straight()
+                                            || glyph.present().iter().filter(|&&a| a).count() == 1
+                                        {
+                                            assert_eq!(glyph.dash, dash, "{context} ({x}, {y})");
+                                        }
+                                        if glyph.is_corner() && weight == 1 {
+                                            assert_eq!(
+                                                glyph.arc, line_style.rounded,
+                                                "{context} ({x}, {y})"
+                                            );
+                                        }
+                                    }
+                                    if glyph.dash > 0 {
+                                        assert!(
+                                            styled_here,
+                                            "{context}: dash outside the style at ({x}, {y})"
+                                        );
+                                        assert_eq!(
+                                            glyph.dash,
+                                            line_style.dash.map_or(0, dash_count)
+                                        );
+                                    }
+                                    if glyph.arc {
+                                        assert!(
+                                            styled_here && line_style.rounded,
+                                            "{context}: stray arc at ({x}, {y})"
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(renders, 13 * 3 * 7 * 4 * 5);
+    }
+
+    #[test]
+    fn pane_border_dashes_only_on_straight_runs() {
+        let (mut workspace, [top_left, ..]) = border_grid();
+        workspace.tabs[0].layout.focus_pane(top_left);
+        let area = Rect::new(0, 0, 12, 6);
+        let mut app = border_app(PaneBordersConfig::Auto, false, true);
+        assert_eq!(
+            buffer_rows(&render_styled(
+                &mut app,
+                &workspace,
+                area,
+                styles(Some("light-dashed-2"), None, None)
+            )),
+            vec![
+                "┌╌╌╌╌╌┬╌╌╌╌┐",
+                "╎     ╎    ╎",
+                "╎     ╎    ╎",
+                "├╌╌╌╌╌┼╌╌╌╌┤",
+                "╎     ╎    ╎",
+                "└╌╌╌╌╌┴╌╌╌╌┘",
+            ]
+        );
+        assert_eq!(
+            buffer_rows(&render_styled(
+                &mut app,
+                &workspace,
+                area,
+                styles(None, Some("heavy-dashed-3"), None)
+            )),
+            vec![
+                "┏┅┅┅┅┅┱────┐",
+                "┇     ┇    │",
+                "┇     ┇    │",
+                "┡┅┅┅┅┅╃────┤",
+                "│     │    │",
+                "└─────┴────┘",
+            ]
+        );
+        assert_eq!(
+            buffer_rows(&render_styled(
+                &mut app,
+                &workspace,
+                area,
+                styles(Some("heavy-dashed-4"), Some("light"), None)
+            )),
+            vec![
+                "┌─────┮┉┉┉┉┓",
+                "│     │    ┋",
+                "│     │    ┋",
+                "┟─────╆┉┉┉┉┫",
+                "┋     ┋    ┋",
+                "┗┉┉┉┉┉┻┉┉┉┉┛",
+            ]
+        );
+        // Outer edges off: the divider's lone-arm ends are straight and dash too.
+        let mut app = border_app(PaneBordersConfig::Auto, false, false);
+        assert_eq!(
+            buffer_rows(&render_styled(
+                &mut app,
+                &workspace,
+                area,
+                styles(Some("rounded-dashed-4"), None, None)
+            )),
+            vec![
+                "      ┊     ",
+                "      ┊     ",
+                "      ┊     ",
+                "┈┈┈┈┈┈┼┈┈┈┈┈",
+                "      ┊     ",
+                "      ┊     ",
+            ]
+        );
+    }
+
+    #[test]
+    fn pane_border_style_arcs_only_on_light_corners() {
+        let (mut workspace, [top_left, ..]) = border_grid();
+        workspace.tabs[0].layout.focus_pane(top_left);
+        let area = Rect::new(0, 0, 12, 6);
+        let mut app = border_app(PaneBordersConfig::Auto, false, true);
+        // Rounded inactive, heavy active: the focused frame stays square.
+        assert_eq!(
+            buffer_rows(&render_styled(
+                &mut app,
+                &workspace,
+                area,
+                styles(None, Some("heavy"), Some("rounded"))
+            )),
+            vec![
+                "┏━━━━━┱────╮",
+                "┃     ┃    │",
+                "┃     ┃    │",
+                "┡━━━━━╃────┤",
+                "│     │    │",
+                "╰─────┴────╯",
+            ]
+        );
+        // Rounded active over heavy: only the focused frame's light corner arcs.
+        assert_eq!(
+            buffer_rows(&render_styled(
+                &mut app,
+                &workspace,
+                area,
+                styles(Some("heavy"), Some("rounded"), None)
+            )),
+            vec![
+                "╭─────┮━━━━┓",
+                "│     │    ┃",
+                "│     │    ┃",
+                "┟─────╆━━━━┫",
+                "┃     ┃    ┃",
+                "┗━━━━━┻━━━━┛",
+            ]
+        );
+        // Separate frames: every unfocused corner arcs, the double frame stays square.
+        let mut app = border_app(PaneBordersConfig::Auto, true, true);
+        assert_eq!(
+            buffer_rows(&render_styled(
+                &mut app,
+                &workspace,
+                area,
+                styles(Some("rounded"), Some("double"), None)
+            )),
+            vec![
+                "╔════╗╭────╮",
+                "║    ║│    │",
+                "╚════╝╰────╯",
+                "╭────╮╭────╮",
+                "│    ││    │",
+                "╰────╯╰────╯",
+            ]
+        );
+        // Heavy, double and heavy-dashed styles never arc.
+        for name in [
+            "heavy",
+            "double",
+            "heavy-dashed-2",
+            "light",
+            "light-dashed-3",
+        ] {
+            let buffer = render_styled(&mut app, &workspace, area, styles(Some(name), None, None));
+            assert!(
+                cells_where(&buffer, |c| decode_glyph(c.symbol()).is_some_and(|g| g.arc))
+                    .is_empty(),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn pane_border_style_mixed_junction_for_every_style_pair() {
+        let area = Rect::new(0, 0, 12, 6);
+        let (mut grid, [grid_top_left, ..]) = border_grid();
+        grid.tabs[0].layout.focus_pane(grid_top_left);
+        let (mut stack, [stack_left, ..]) = border_stack();
+        stack.tabs[0].layout.focus_pane(stack_left);
+        let mut checked = 0;
+        for (active_name, active) in PaneBorderStyle::NAMES {
+            for (inactive_name, inactive) in PaneBorderStyle::NAMES {
+                let (a, i) = (LineStyle::of(active).weight, LineStyle::of(inactive).weight);
+                let keys = styles(None, Some(active_name), Some(inactive_name));
+                let mut app = border_app(PaneBordersConfig::Auto, false, true);
+                // Grid centre cross: up and left on the focused frame.
+                // Stack divider T: up and down on the focused frame, right not.
+                for (workspace, (x, y), arms) in [
+                    (&grid, (6u16, 3u16), [Some(a), Some(i), Some(a), Some(i)]),
+                    (&stack, (6, 3), [Some(a), Some(a), None, Some(i)]),
+                ] {
+                    let buffer = render_styled(&mut app, workspace, area, keys);
+                    let glyph = decode_glyph(buffer[(x, y)].symbol()).unwrap();
+                    let present: Vec<LineWeight> = arms.iter().flatten().copied().collect();
+                    let has = |w: LineWeight| present.contains(&w);
+                    let expected = arms.map(|arm| arm.map_or(0, weight_code));
+                    let axis_uniform = |first: Option<LineWeight>, second: Option<LineWeight>| {
+                        axis_weight(first, second).is_some()
+                            || (first.is_none() && second.is_none())
+                    };
+                    let exact = if !has(LineWeight::Double) {
+                        true
+                    } else if has(LineWeight::Heavy) {
+                        false
+                    } else {
+                        // Light/double: exact when each axis has one weight.
+                        axis_uniform(arms[0], arms[1]) && axis_uniform(arms[2], arms[3])
+                    };
+                    if exact {
+                        assert_eq!(
+                            glyph.arms, expected,
+                            "{active_name}/{inactive_name} at ({x}, {y})"
+                        );
+                    } else {
+                        assert_eq!(
+                            glyph.arms,
+                            arms.map(|arm| if arm.is_some() { 3 } else { 0 }),
+                            "{active_name}/{inactive_name} falls back to double at ({x}, {y})"
+                        );
+                    }
+                    // Junctions are never dashed or rounded.
+                    assert_eq!((glyph.dash, glyph.arc), (0, false));
+                    checked += 1;
+                }
+            }
+        }
+        assert_eq!(checked, 13 * 13 * 2);
+
+        // Spot checks against the glyphs named in the docs.
+        let mut app = border_app(PaneBordersConfig::Auto, false, true);
+        for (keys, workspace, glyph) in [
+            (styles(None, Some("heavy"), None), &grid, "╃"),
+            (styles(None, Some("heavy"), None), &stack, "┠"),
+            (styles(None, Some("double"), None), &stack, "╟"),
+            (styles(Some("double"), Some("light"), None), &stack, "╞"),
+            (styles(None, Some("double"), Some("heavy")), &stack, "╠"),
+            (styles(None, Some("double"), None), &grid, "╬"),
+        ] {
+            assert_eq!(
+                render_styled(&mut app, workspace, area, keys)[(6, 3)].symbol(),
+                glyph,
+                "{keys:?}"
             );
         }
     }
