@@ -372,6 +372,7 @@ pane_border_style_active = "heavy"
 | 任意线型 × `pane_title_tokens` | 可叠加；组合标题以其令牌颜色和焦点粗体替换上边的单元格，标题之后的边保持窗格线型（包括虚线） |
 | 任意线型 × `pane_border_identity_token` | 可叠加；字符来自窗格线型，颜色来自标识色或焦点色，二者相互独立。在共享分隔线上，聚焦窗格的线型和颜色都优先 |
 | 任意线型 × `pane_inactive_bg`（主题键） | 可叠加；着色只填充未聚焦窗格的内容，边框字符和颜色不变 |
+| 任意线型 × `inactive_pane_dim_percent` | 可叠加；淡化只作用于未聚焦窗格的文字，边框字符和颜色保持配置不变 |
 | 圆角 × 粗线或双线 | Unicode 没有粗线或双线圆角，因此粗线和双线转角保持方角 |
 | 虚线 × 转角和连接处 | 只有直线段为虚线；转角、T 形和十字连接处为相同粗细的实线 |
 | 共享分隔线上不同线型相遇（`pane_gaps = false` 或 `pane_gap_cells = 0`） | 与焦点颜色一样，聚焦窗格边框上以其线型为准。连接处在 Unicode 有对应混合字符时使用该字符（所有细线与粗线的组合，以及纵横分开的细线与双线组合）；否则含双线的连接处整体使用双线。与实线共享的虚线段采用胜出一方的线型 |
@@ -388,6 +389,8 @@ pane_border_style_active = "heavy"
 在 `[ui]` 下设置 `pane_title_tokens`，可使用与 `ui.sidebar.agents.rows` 相同的令牌行格式组成窗格边框标题，例如 `pane_title_tokens = ["tab", { token = "$task", fg = "#f38ba8" }]`。支持文本内置令牌（`workspace`、`tab`、`pane`、`agent`、`terminal_title`、`terminal_title_stripped`）和 `$name` 窗格元数据令牌；`state_icon`、`state_text` 和 `machine` 在标题中视为缺失。令牌会随 `herdr pane report-metadata` 的更新、清除和 TTL 过期实时刷新。缺失的令牌会被跳过；如果没有剩余文本，标题依次回退到上报的标题、手动标签，以及启用 `show_agent_labels_on_pane_borders` 时的代理标签。令牌颜色优先于边框标题颜色，聚焦窗格会额外加粗。标题按窗格宽度用 `…` 截断。设置 `pane_manual_label_first = true` 可让非空的手动窗格标签优先于上报的标题和令牌。要在单个窗格上显示标题，请使用 `pane_borders = "always"`。
 
 在 `[ui]` 下设置 `pane_border_identity_token`，可用一个与 `ui.sidebar.agents.rows` 条目格式相同的令牌为未聚焦窗格的边框线着色，例如 `pane_border_identity_token = { token = "$role", rules = [{ equals = "review", fg = "#f9e2af" }, { equals = "build", fg = "#a6e3a1" }] }`，再配合 `herdr pane report-metadata <pane_id> --source ID --token role=build`。当令牌解析出文本且其样式带有 `fg` 时，该颜色用于此窗格的非活动边框线；令牌缺失、被清除、已过期或没有 `fg` 时，保留常规的非活动边框颜色。聚焦窗格始终保持强调色；仅由未聚焦窗格共享的分隔线或交汇点，只有在所有共享它的窗格颜色相同时才使用该颜色。标题和窗格背景不变。与其他窗格边框设置一样，读取的是服务器端的配置。
+
+在 `[ui]` 下设置 `inactive_pane_dim_percent = N`（0 到 100，默认 `0` 表示关闭），可在你于聚焦窗格中输入时淡化未聚焦窗格的文字。Herdr 会把每个文字颜色按 N% 向终端默认背景色混合，仅影响屏幕显示：窗格内容、复制的文本和其中运行的程序都不会改变。它只在普通终端模式下生效（前缀、复制、导航和调整大小模式下窗格保持原样），并且不会改变背景色、边框、焦点强调色、faint 文字、选区，或绘制在自身背景色上的文字（包括反显）。它需要终端响应默认颜色和调色板的查询；终端未报告的颜色保持不变。`100` 会让文字与背景色相同。`inactive_pane_dim_exclude_processes = ["name", ...]` 可用于列出不淡化的前台程序，该设置会被接受，但目前没有效果，因为 Herdr 在绘制时无法获知窗格的前台进程。两个键的无效值都会被报告并忽略。
 
 在 `[ui]` 下设置 `tab_bar_position = "bottom"`，可将桌面标签栏放到终端窗格下方。Prefix、Navigate、Copy 和 Resize 模式栏会在显示期间临时替换底部标签栏。默认值为 `"top"`。
 
