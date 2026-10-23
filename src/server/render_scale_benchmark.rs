@@ -17,6 +17,9 @@ const SAMPLE_COUNT: usize = 40;
 const WARMUP_COUNT: usize = 5;
 const CARDINALITIES: [usize; 3] = [1, 15, 50];
 
+#[path = "styling_compatibility_tests.rs"]
+mod styling_compatibility_tests;
+
 #[derive(Clone, Copy)]
 struct StageStats {
     median_us: u128,

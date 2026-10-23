@@ -533,46 +533,51 @@ fn state_with_scrollable_agents() -> (ClientShellState, ClientEndpointId) {
 /// the sidebar, for both endpoint layouts and both ends of the overflowing list.
 #[test]
 fn sidebar_toggle_remains_clickable_with_overflowing_agents() {
-    for saved_machine in [false, true] {
-        for scroll_to_bottom in [false, true] {
-            let (mut state, _) = state_with_scrollable_agents();
-            if !saved_machine {
-                state.set_endpoint_catalog(&[]);
+    for padding in [0, 1, 2] {
+        for saved_machine in [false, true] {
+            for scroll_to_bottom in [false, true] {
+                let (mut state, _) = state_with_scrollable_agents();
+                let config: Config =
+                    toml::from_str(&format!("[ui]\nsidebar_padding_cells = {padding}\n")).unwrap();
+                state.config = ClientShellConfig::from_config(&config);
+                if !saved_machine {
+                    state.set_endpoint_catalog(&[]);
+                }
+                state.agent_scroll = if scroll_to_bottom { usize::MAX } else { 0 };
+                let frame = state.compose(100, 28).expect("overflowing agent panel");
+                assert!(!state.hits.agent_scrollbar.is_empty());
+                let scroll = state.agent_scroll;
+
+                let toggle = state.hits.sidebar_toggle;
+                let buffer = frame.to_ratatui_buffer().expect("sidebar buffer");
+                assert_eq!(buffer[(toggle.x, toggle.y)].symbol(), "«");
+                let outcome = state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: toggle.x,
+                    row: toggle.y,
+                    modifiers: KeyModifiers::NONE,
+                })]);
+                assert!(
+                    state.sidebar_collapsed,
+                    "collapse with padding={padding}, saved_machine={saved_machine}, scroll_to_bottom={scroll_to_bottom}"
+                );
+                assert!(state.sidebar_collapsed_manual);
+                assert!(outcome.repaint && outcome.resize);
+                assert_eq!(state.agent_scroll, scroll);
+                assert!(state.chrome_drag.is_none());
+
+                state.compose(100, 28).expect("collapsed sidebar");
+                let toggle = state.hits.sidebar_toggle;
+                let outcome = state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
+                    kind: MouseEventKind::Down(MouseButton::Left),
+                    column: toggle.x,
+                    row: toggle.y,
+                    modifiers: KeyModifiers::NONE,
+                })]);
+                assert!(!state.sidebar_collapsed);
+                assert!(outcome.repaint && outcome.resize);
+                assert!(state.chrome_drag.is_none());
             }
-            state.agent_scroll = if scroll_to_bottom { usize::MAX } else { 0 };
-            let frame = state.compose(100, 28).expect("overflowing agent panel");
-            assert!(!state.hits.agent_scrollbar.is_empty());
-            let scroll = state.agent_scroll;
-
-            let toggle = state.hits.sidebar_toggle;
-            let buffer = frame.to_ratatui_buffer().expect("sidebar buffer");
-            assert_eq!(buffer[(toggle.x, toggle.y)].symbol(), "«");
-            let outcome = state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: toggle.x,
-                row: toggle.y,
-                modifiers: KeyModifiers::NONE,
-            })]);
-            assert!(
-                state.sidebar_collapsed,
-                "collapse with saved_machine={saved_machine}, scroll_to_bottom={scroll_to_bottom}"
-            );
-            assert!(state.sidebar_collapsed_manual);
-            assert!(outcome.repaint && outcome.resize);
-            assert_eq!(state.agent_scroll, scroll);
-            assert!(state.chrome_drag.is_none());
-
-            state.compose(100, 28).expect("collapsed sidebar");
-            let toggle = state.hits.sidebar_toggle;
-            let outcome = state.handle_raw_events(vec![RawInputEvent::Mouse(MouseEvent {
-                kind: MouseEventKind::Down(MouseButton::Left),
-                column: toggle.x,
-                row: toggle.y,
-                modifiers: KeyModifiers::NONE,
-            })]);
-            assert!(!state.sidebar_collapsed);
-            assert!(outcome.repaint && outcome.resize);
-            assert!(state.chrome_drag.is_none());
         }
     }
 }

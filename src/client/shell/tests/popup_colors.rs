@@ -370,3 +370,118 @@ fn rounded_popup_frame_keeps_popup_border_and_background_colors() {
         }
     }
 }
+
+// Popup styling must survive transformations on overlapping inactive content.
+#[test]
+fn popup_colors_survive_underlying_inactive_tint_and_dimming() {
+    use crate::terminal_theme::{DefaultColorKind, RgbColor};
+
+    let mut source = surface_with_popup_frame("popup", popup_frame());
+    let mut buffer = Buffer::empty(Rect::new(0, 0, 80, 19));
+    for y in 0..19 {
+        for x in 0..80 {
+            buffer[(x, y)].set_symbol("u");
+        }
+    }
+    source.frame = FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, None, &[]);
+    let original_pane = source.panes[0].clone();
+    source.panes = [("pane_1", 0, false), ("pane_2", 40, true)]
+        .into_iter()
+        .map(|(id, x, focused)| {
+            let mut pane = original_pane.clone();
+            pane.pane_id = id.into();
+            pane.rect = SurfaceRect {
+                x,
+                y: 0,
+                width: 40,
+                height: 19,
+            };
+            pane.inner_rect = pane.rect;
+            pane.focused = focused;
+            pane
+        })
+        .collect();
+    let compose = |enabled, popup_background: &str| {
+        let config = config_from(&format!(
+            "[ui]\nrounded_borders = true\ninactive_pane_dim_percent = {}\n\
+             [theme.custom]\npopup_bg = \"{popup_background}\"\npopup_border = \"#a0b0c0\"\n{}",
+            if enabled { 50 } else { 0 },
+            if enabled {
+                "pane_inactive_bg = \"#204060\"\n"
+            } else {
+                ""
+            },
+        ));
+        let mut state = popup_state(&config);
+        state.handle_raw_events(vec![
+            RawInputEvent::HostDefaultColor {
+                kind: DefaultColorKind::Foreground,
+                color: RgbColor {
+                    r: 200,
+                    g: 200,
+                    b: 200,
+                },
+            },
+            RawInputEvent::HostDefaultColor {
+                kind: DefaultColorKind::Background,
+                color: RgbColor { r: 0, g: 0, b: 0 },
+            },
+        ]);
+        state.set_pane_surface(source.clone());
+        let frame = state.compose(COLS, ROWS).expect("popup frame").frame;
+        let popup = state.hits.popup.clone().expect("popup hit");
+        let inactive = state
+            .hits
+            .panes
+            .iter()
+            .find(|pane| pane.pane_id == "pane_1")
+            .expect("inactive pane")
+            .inner_rect;
+        (frame, popup, inactive)
+    };
+    for (popup_background, popup_bg) in
+        [("#102030", Color::Rgb(16, 32, 48)), ("reset", Color::Reset)]
+    {
+        let (baseline, popup, inactive) = compose(false, popup_background);
+        let (styled, styled_popup, styled_inactive) = compose(true, popup_background);
+        assert_eq!(popup.rect, styled_popup.rect);
+        assert_eq!(popup.inner_rect, styled_popup.inner_rect);
+        assert_eq!(inactive, styled_inactive);
+        assert!(popup.rect.intersects(inactive), "exercise actual occlusion");
+        assert_eq!(baseline.cursor, styled.cursor);
+        assert_eq!(
+            (baseline.width, baseline.height),
+            (styled.width, styled.height)
+        );
+        for frame in [&baseline, &styled] {
+            assert_popup_colors(frame, &popup, Color::Rgb(160, 176, 192), popup_bg, popup_bg);
+            assert_eq!(cell(frame, popup.rect.x, popup.rect.y).symbol, "╭");
+        }
+        let mut transformed = 0;
+        for y in 0..baseline.height {
+            for x in 0..baseline.width {
+                let point = ratatui::layout::Position::new(x, y);
+                let before = cell(&baseline, x, y);
+                let after = cell(&styled, x, y);
+                if inactive.contains(point) && !popup.rect.contains(point) {
+                    assert_eq!(before.symbol, "u");
+                    assert_eq!(
+                        (before.fg, before.bg),
+                        (color_to_u32(Color::Reset), color_to_u32(Color::Reset))
+                    );
+                    let mut expected = before.clone();
+                    // Half of host default fg (200) plus half of the visible tint (32,64,96).
+                    expected.fg = color_to_u32(Color::Rgb(116, 132, 148));
+                    expected.bg = color_to_u32(Color::Rgb(32, 64, 96));
+                    assert_eq!(after, &expected, "underlying inactive text at {x},{y}");
+                    transformed += 1;
+                } else {
+                    // Includes the entire popup (frame, title, PTY/default/explicit colors),
+                    // focused pane and all remaining shell chrome.
+                    assert_eq!(after, before, "unchanged cell at {x},{y}");
+                }
+            }
+        }
+        assert!(transformed > 0, "tint and dim must both be visibly active");
+    }
+}

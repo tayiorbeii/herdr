@@ -1114,3 +1114,216 @@ fn committed_text_still_reaches_a_report_all_pane_as_text() {
     let after = state.handle_input_bytes("\u{3042}".as_bytes());
     assert_eq!(pane_text_commits(&after).concat(), "\u{3042}");
 }
+
+#[test]
+fn pixel_mouse_targets_an_unfocused_padded_pane_after_a_gap() {
+    for pixel_mode in [false, true] {
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+        let mut projection = snapshot();
+        let mut second = projection.panes[0].clone();
+        second.pane_id = "pane_2".into();
+        second.focused = false;
+        projection.panes.push(second);
+        state.set_snapshot(Box::new(projection));
+        let mut pane_surface = surface();
+        pane_surface.frame =
+            FrameData::from_ratatui_buffer(&Buffer::empty(Rect::new(0, 0, 20, 6)), None);
+        pane_surface.panes[0].rect = SurfaceRect {
+            x: 0,
+            y: 0,
+            width: 8,
+            height: 6,
+        };
+        pane_surface.panes[0].inner_rect = SurfaceRect {
+            x: 2,
+            y: 2,
+            width: 4,
+            height: 2,
+        };
+        let mut target = pane_surface.panes[0].clone();
+        target.pane_id = "pane_2".into();
+        target.rect.x = 12;
+        target.inner_rect.x = 14;
+        target.focused = false;
+        target.mouse_reporting = true;
+        target.sgr_pixel_mouse = pixel_mode;
+        target.pixel_width = 40;
+        target.pixel_height = 40;
+        pane_surface.panes.push(target);
+        state.set_pane_surface(pane_surface);
+        state.compose(106, 20).expect("composed padded panes");
+        let pane = state
+            .hits
+            .panes
+            .iter()
+            .find(|pane| pane.pane_id == "pane_2")
+            .unwrap()
+            .clone();
+        assert_eq!((pane.inner_rect.width, pane.inner_rect.height), (4, 2));
+        assert_eq!((pane.pixel_width, pane.pixel_height), (40, 40));
+        let geometry = crate::input::mouse::HostGeometry::new(106, 20, 1060, 400).unwrap();
+        let press = |column: u16, row: u16| {
+            format!(
+                "\x1b[<0;{};{}M",
+                u32::from(column) * 10 + 1,
+                u32::from(row) * 20 + 1
+            )
+        };
+        for (column, row) in [
+            (pane.rect.x - 2, pane.rect.y + 1),
+            (pane.rect.x + 1, pane.rect.y + 1),
+        ] {
+            let outcome = state.handle_pixel_mouse(press(column, row).as_bytes(), geometry);
+            assert!(
+                !outcome
+                    .requests
+                    .iter()
+                    .any(|request| matches!(request, ClientMessage::ClientShellPaneInput { .. })),
+                "gap/padding must not reach the child"
+            );
+            let release = press(column, row).replace('M', "m");
+            let outcome = state.handle_pixel_mouse(release.as_bytes(), geometry);
+            assert!(
+                !outcome
+                    .requests
+                    .iter()
+                    .any(|request| matches!(request, ClientMessage::ClientShellPaneInput { .. })),
+                "gap/padding releases must not reach the child"
+            );
+        }
+        assert_eq!(
+            state.focused_pane_id().as_deref(),
+            Some("pane_1"),
+            "the target pane must still be unfocused before routing input"
+        );
+        let outcome = state.handle_pixel_mouse(
+            press(pane.inner_rect.x + 2, pane.inner_rect.y + 1).as_bytes(),
+            geometry,
+        );
+        let events = outcome
+            .requests
+            .iter()
+            .find_map(|request| match request {
+                ClientMessage::ClientShellPaneInput { pane_id, events } if pane_id == "pane_2" => {
+                    Some(events)
+                }
+                _ => None,
+            })
+            .expect("input targets the visible unfocused pane");
+        // Child SGR pixels are one-based; the cell fallback below is zero-based.
+        if pixel_mode {
+            assert!(matches!(
+                &events[..],
+                [ClientPaneInputEvent::Mouse {
+                    position: ClientMousePosition::Pixels { x: 21, y: 21, .. },
+                    ..
+                }]
+            ));
+        } else {
+            assert!(matches!(
+                &events[..],
+                [ClientPaneInputEvent::Mouse {
+                    position: ClientMousePosition::Cell { column: 2, row: 1 },
+                    ..
+                }]
+            ));
+        }
+    }
+}
+
+// Host color replies must preserve typing and local prefix ownership.
+#[test]
+fn inactive_dimming_host_colors_preserve_key_routing_and_prefix_transitions() {
+    use crate::protocol::{ClientKeyCode, ClientKeyKind};
+    use crate::terminal_theme::{DefaultColorKind, RgbColor};
+
+    let enabled: Config = toml::from_str(
+        "[ui]\ninactive_pane_dim_percent = 50\n\
+         [theme.custom]\npane_inactive_bg = \"#204060\"\n",
+    )
+    .expect("styling config");
+    let make_state = |config: &Config| {
+        let mut state = ClientShellState::new(ClientShellConfig::from_config(config));
+        state.set_snapshot(Box::new(snapshot()));
+        state.set_pane_surface(surface());
+        state
+    };
+    let mut control = make_state(&Config::default());
+    let mut styled = make_state(&enabled);
+    let key = |code, modifiers| RawInputEvent::Key(crate::input::TerminalKey::new(code, modifiers));
+    let color = |kind, value| RawInputEvent::HostDefaultColor {
+        kind,
+        color: RgbColor {
+            r: value,
+            g: value,
+            b: value,
+        },
+    };
+    let route = |state: &mut ClientShellState, phase| {
+        state.handle_raw_events(match phase {
+            0 => vec![
+                key(KeyCode::Char('x'), KeyModifiers::empty()),
+                color(DefaultColorKind::Foreground, 200),
+                key(KeyCode::Char('y'), KeyModifiers::empty()),
+                color(DefaultColorKind::Background, 0),
+            ],
+            1 => vec![
+                key(KeyCode::Char('b'), KeyModifiers::CONTROL),
+                color(DefaultColorKind::Foreground, 180),
+            ],
+            _ => vec![
+                key(KeyCode::Esc, KeyModifiers::empty()),
+                color(DefaultColorKind::Background, 20),
+                key(KeyCode::Char('z'), KeyModifiers::empty()),
+            ],
+        })
+    };
+    for phase in 0..3 {
+        let reference = route(&mut control, phase);
+        let outcome = route(&mut styled, phase);
+        // Equality includes all pane targets and every key/text/release payload field,
+        // plus host-theme messages: replies cannot consume, duplicate or retarget input.
+        assert_eq!(outcome.requests, reference.requests, "phase {phase}");
+        for request in &outcome.requests {
+            if let ClientMessage::ClientShellPaneInput { pane_id, .. } = request {
+                assert_eq!(pane_id, "pane_1", "phase {phase}");
+            }
+        }
+        let expected_keys = match phase {
+            0 => vec![
+                (ClientKeyCode::Char('x'), ClientKeyKind::Press),
+                (ClientKeyCode::Char('y'), ClientKeyKind::Press),
+            ],
+            1 => Vec::new(), // Ctrl+B and its host reply remain owned by Herdr.
+            _ => vec![(ClientKeyCode::Char('z'), ClientKeyKind::Press)],
+        };
+        assert_eq!(pane_key_events(&outcome), expected_keys, "phase {phase}");
+        let expected_mode = if phase == 1 {
+            ClientShellMode::Prefix
+        } else {
+            ClientShellMode::Terminal
+        };
+        assert_eq!(styled.mode, expected_mode);
+        assert_eq!(control.mode, expected_mode);
+        assert_eq!(styled.inactive_pane_dim().is_some(), phase != 1);
+        assert!(control.inactive_pane_dim().is_none());
+        let foreground = if phase == 0 { 200 } else { 180 };
+        let background = if phase == 2 { 20 } else { 0 };
+        assert_eq!(
+            styled.host_foreground,
+            Some(RgbColor {
+                r: foreground,
+                g: foreground,
+                b: foreground,
+            })
+        );
+        assert_eq!(
+            styled.host_background,
+            Some(RgbColor {
+                r: background,
+                g: background,
+                b: background,
+            })
+        );
+    }
+}
