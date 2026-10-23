@@ -1,6 +1,6 @@
 use ratatui::{layout::Rect, Frame};
 
-use super::panes::{compute_pane_infos_for_tab, render_panes, resize_tab_panes};
+use super::panes::{compute_pane_infos_for_tab, render_panes, resize_tab_panes, PaneGaps};
 use crate::app::AppState;
 use crate::layout::{PaneInfo, SplitBorder};
 use crate::protocol::CursorState;
@@ -16,6 +16,8 @@ pub(crate) struct TabSurfaceLayout {
     pub(crate) target: Option<TabSurfaceTarget>,
     pub(crate) pane_infos: Vec<PaneInfo>,
     pub(crate) split_borders: Vec<SplitBorder>,
+    /// Inter-pane spacing resolved for this layout; drives border merging and split hits.
+    pub(crate) pane_gaps: PaneGaps,
 }
 
 #[derive(Clone, Copy)]
@@ -23,6 +25,7 @@ pub(crate) struct TabSurfaceView<'a> {
     pub(crate) target: Option<TabSurfaceTarget>,
     pub(crate) pane_infos: &'a [PaneInfo],
     pub(crate) split_borders: &'a [SplitBorder],
+    pub(crate) pane_gaps: PaneGaps,
 }
 
 pub(crate) fn compute_tab_surface(
@@ -72,7 +75,7 @@ pub(crate) fn compute_tab_surface_for(
             }
         })
         .unwrap_or_default();
-    let pane_infos = target.map_or_else(Vec::new, |target| {
+    let (pane_infos, pane_gaps) = target.map_or_else(Default::default, |target| {
         compute_pane_infos_for_tab(
             app,
             terminal_runtimes,
@@ -88,6 +91,7 @@ pub(crate) fn compute_tab_surface_for(
         target,
         pane_infos,
         split_borders,
+        pane_gaps,
     }
 }
 
@@ -129,6 +133,7 @@ pub(crate) fn render_tab_surface(
         surface.target,
         surface.pane_infos,
         surface.split_borders,
+        surface.pane_gaps,
     );
 }
 
@@ -259,6 +264,7 @@ mod tests {
             target: surface.target,
             pane_infos: &surface.pane_infos,
             split_borders: &surface.split_borders,
+            pane_gaps: surface.pane_gaps,
         };
         let mut terminal =
             Terminal::new(TestBackend::new(full_area.width, full_area.height)).unwrap();

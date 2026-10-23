@@ -55,9 +55,33 @@ herdr
 
 run your agents, split panes, walk away. `ctrl+b q` detaches, `herdr` reattaches. [quick start →](https://herdr.dev/docs/quick-start/)
 
+Opt in to rounded corners on existing interface frames with `rounded_borders = true` under `[ui]`. The default stays unchanged; terminal content, dimensions and shared junctions are preserved. See [configuration](https://herdr.dev/docs/configuration/).
+
+Choose pane frame line styles with `pane_border_style` under `[ui]` (`light`, `rounded`, `heavy`, `double` and dashed variants), and override them for the focused or unfocused panes with `pane_border_style_active` / `pane_border_style_inactive`. The default stays unchanged, and pane sizes and dividers are preserved. See [configuration](https://herdr.dev/docs/configuration/).
+
+Choose the blank space between split panes with `pane_gap_cells = N` under `[ui]`: `0` shares dividers, `N` leaves N empty cells between pane frames. Unset keeps the existing `pane_gaps` behavior. See [configuration](https://herdr.dev/docs/configuration/).
+
+Give terminal content room to breathe with `pane_padding_cells = 1` under `[ui]`: empty cells between each pane's frame and its content. The default `0` keeps the existing layout. See [configuration](https://herdr.dev/docs/configuration/).
+
+Give the sidebar breathing room with `sidebar_padding_cells = 1` under `[ui]`: each expanded section and its click targets move inward without widening the sidebar. The default `0` keeps the existing layout. See [configuration](https://herdr.dev/docs/configuration/).
+
+Compose pane border titles from the same styled tokens as the agent sidebar with `pane_title_tokens` under `[ui]`, including live `$name` pane metadata. Unset keeps the existing titles. See [configuration](https://herdr.dev/docs/configuration/).
+
+Color the frame lines of unfocused panes from one styled token with `pane_border_identity_token` under `[ui]`, for example a `$role` reported through pane metadata. The focused pane keeps the accent color, and unset keeps the existing border colors.
+
+Fade the text of unfocused panes with `inactive_pane_dim_percent = N` (0-100) under `[ui]`. It blends text colors toward the terminal background on screen only, in normal terminal mode, and leaves backgrounds, borders and pane contents unchanged. See [configuration](https://herdr.dev/docs/configuration/).
+
 ## docs
 
 everything lives at [herdr.dev/docs](https://herdr.dev/docs/): [quick start](https://herdr.dev/docs/quick-start/) · [concepts](https://herdr.dev/docs/concepts/) · [supported agents](https://herdr.dev/docs/agents/) · [keyboard](https://herdr.dev/docs/keyboard/) · [configuration](https://herdr.dev/docs/configuration/) · [session state](https://herdr.dev/docs/session-state/) · [connecting machines](https://herdr.dev/docs/connecting-machines/) · [remote](https://herdr.dev/docs/persistence-remote/) · [integrations](https://herdr.dev/docs/integrations/) · [add herdr support to your agent](https://herdr.dev/docs/add-herdr-support/) · [plugins](https://herdr.dev/docs/plugins/) · [socket api](https://herdr.dev/docs/socket-api/)
+
+Customize the focused tab label with optional `active_tab_fg` and `active_tab_bg` under `[theme.custom]` (or its `light`/`dark` subtables with `auto_switch`). Omitted colors keep the existing dynamic defaults; reset aliases explicitly use terminal defaults. See [configuration](https://herdr.dev/docs/configuration/).
+
+Customize pane frame and title focus colors with optional `pane_border_active` and `pane_border_inactive` under `[theme.custom]` (or its `light`/`dark` subtables with `auto_switch`). Omitted colors keep following `accent` and `overlay0`; reset aliases explicitly use the terminal default. See [configuration](https://herdr.dev/docs/configuration/).
+
+Customize terminal popups with optional `popup_bg` and `popup_border` under `[theme.custom]` (or its `light`/`dark` subtables with `auto_switch`). Omitted colors keep the existing popup look; explicit program backgrounds inside the popup are kept. See [configuration](https://herdr.dev/docs/configuration/).
+
+Tint unfocused panes with an optional `pane_inactive_bg` under `[theme.custom]` (or its `light`/`dark` subtables with `auto_switch`). Only terminal-default backgrounds change; program colors, reverse video, selections, and the focused pane stay as they are. Omitting it keeps the current look. See [configuration](https://herdr.dev/docs/configuration/).
 
 ## thanks
 

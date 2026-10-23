@@ -53,9 +53,33 @@ herdr
 
 运行你的智能体、分割窗格，然后安心离开。`ctrl+b q` 分离，`herdr` 重新连接。[快速开始 →](https://herdr.dev/zh-cn/docs/quick-start/)
 
+在 `[ui]` 下设置 `rounded_borders = true`，即可为现有界面边框启用圆角。默认保持不变；终端内容、尺寸和共享连接处均保持原样。参见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
+
+在 `[ui]` 下用 `pane_border_style` 选择窗格边框线型（`light`、`rounded`、`heavy`、`double` 及虚线变体），并可用 `pane_border_style_active` / `pane_border_style_inactive` 分别覆盖聚焦或未聚焦窗格的线型。默认保持不变，窗格尺寸和分隔线均保持原样。参见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
+
+在 `[ui]` 下用 `pane_gap_cells = N` 设置分割窗格之间的空白：`0` 共用分隔线，`N` 在窗格边框之间留出 N 个空白单元格。未设置时保持现有的 `pane_gaps` 行为。参见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
+
+在 `[ui]` 下设置 `pane_padding_cells = 1`，可在每个窗格的边框与内容之间留出空白单元格。默认值 `0` 保持原有布局。参见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
+
+在 `[ui]` 下用 `sidebar_padding_cells = 1` 为侧边栏留出空间：每个展开的分区及其点击区域向内收缩，侧边栏宽度不变。默认值 `0` 保持现有布局。参见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
+
+在 `[ui]` 下用 `pane_title_tokens` 以与智能体侧边栏相同的样式化标记组成窗格边框标题，包括实时的 `$name` 窗格元数据。未设置时保持现有标题。参见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
+
+在 `[ui]` 下用 `pane_border_identity_token` 根据一个样式化标记为未获得焦点的窗格边框线着色，例如通过窗格元数据报告的 `$role`。获得焦点的窗格保持强调色，未设置时保持现有边框颜色。
+
+在 `[ui]` 下用 `inactive_pane_dim_percent = N`（0-100）淡化未聚焦窗格的文字。它只在普通终端模式下、仅在屏幕上把文字颜色向终端背景色混合，背景色、边框和窗格内容保持不变。参见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
+
 ## 文档
 
 所有文档都在 [herdr.dev/docs](https://herdr.dev/zh-cn/docs/)：[快速开始](https://herdr.dev/zh-cn/docs/quick-start/) · [核心概念](https://herdr.dev/zh-cn/docs/concepts/) · [受支持的智能体](https://herdr.dev/zh-cn/docs/agents/) · [键盘](https://herdr.dev/zh-cn/docs/keyboard/) · [配置](https://herdr.dev/zh-cn/docs/configuration/) · [会话状态](https://herdr.dev/zh-cn/docs/session-state/) · [连接机器](https://herdr.dev/zh-cn/docs/connecting-machines/) · [远程访问](https://herdr.dev/zh-cn/docs/persistence-remote/) · [集成](https://herdr.dev/zh-cn/docs/integrations/) · [为智能体添加 herdr 支持](https://herdr.dev/zh-cn/docs/add-herdr-support/) · [插件](https://herdr.dev/zh-cn/docs/plugins/) · [socket api](https://herdr.dev/zh-cn/docs/socket-api/)
+
+可在 `[theme.custom]` 中使用可选的 `active_tab_fg` 和 `active_tab_bg` 自定义已聚焦标签页标签的颜色（启用 `auto_switch` 时也可在 `light`/`dark` 子表中设置）。省略颜色会保留现有的动态默认值；重置别名明确使用终端默认色。详情见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
+
+可在 `[theme.custom]` 中使用可选的 `pane_border_active` 和 `pane_border_inactive` 自定义窗格边框与标题的聚焦颜色（启用 `auto_switch` 时也可在 `light`/`dark` 子表中设置）。省略时继续跟随 `accent` 和 `overlay0`；重置别名明确使用终端默认色。详情见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
+
+可在 `[theme.custom]` 中使用可选的 `popup_bg` 和 `popup_border` 自定义终端弹窗（启用 `auto_switch` 时也可在 `light`/`dark` 子表中设置）。省略颜色会保留现有的弹窗外观；弹窗内程序显式设置的背景色保持不变。详情见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
+
+可在 `[theme.custom]` 中使用可选的 `pane_inactive_bg` 为未聚焦窗格着色（启用 `auto_switch` 时也可在 `light`/`dark` 子表中设置）。只会改变终端默认背景；程序颜色、反色显示、选区和已聚焦窗格保持不变。省略时保持现有外观。详情见[配置](https://herdr.dev/zh-cn/docs/configuration/)。
 
 ## 致谢
 

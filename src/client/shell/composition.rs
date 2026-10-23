@@ -142,6 +142,7 @@ impl ClientShellState {
                 notice,
                 1,
                 &self.config.palette,
+                self.config.rounded_borders,
             );
         }
         FrameData::from_ratatui_buffer_with_hyperlinks(&buffer, None, &[])
@@ -344,6 +345,17 @@ impl ClientShellState {
             frame.cells[start..start + usize::from(bar.width)].to_vec()
         });
         blit_pane_surface(&mut frame, &surface.frame, layout.pane_surface);
+        if self.config.rounded_borders {
+            super::borders::round_pane_corners(&mut frame, &surface.panes, layout.pane_surface);
+        }
+        if let Some(style) = InactivePaneStyle::resolve(self) {
+            paint_inactive_pane_default_background(
+                &mut frame,
+                surface,
+                layout.pane_surface,
+                &style,
+            );
+        }
         restore_mode_bar(&mut frame, mode_bar, mode_bar_cells.as_deref());
         let mut occlusion = crate::kitty_graphics::surface::Occlusion::default();
         let has_selection = self
@@ -499,6 +511,7 @@ impl ClientShellState {
                         notice,
                         u16::from(has_config_diagnostic) + lifecycle_offset,
                         &self.config.palette,
+                        self.config.rounded_borders,
                     )
                 } else {
                     endpoint_notices::render_mobile_banner(
@@ -518,6 +531,7 @@ impl ClientShellState {
                         self.config.toast_position,
                         u16::from(has_config_diagnostic) + lifecycle_offset,
                         &self.config.palette,
+                        self.config.rounded_borders,
                     )
                 } else {
                     notifications::render_mobile_notification_banner(
@@ -555,6 +569,7 @@ impl ClientShellState {
                 offset,
                 self.config.clipboard_toast_position,
                 &self.config.palette,
+                self.config.rounded_borders,
             ));
             frame.replace_from_ratatui_buffer_preserving_effects(&composed, cursor);
         }
@@ -567,11 +582,21 @@ impl ClientShellState {
             {
                 occlusion.start_popup(geometry.outer);
                 let mut composed = frame.to_ratatui_buffer()?;
+                let palette = &self.config.palette;
                 let block = ratatui::widgets::Block::default()
                     .borders(ratatui::widgets::Borders::ALL)
-                    .border_style(ratatui::style::Style::default().fg(self.config.palette.accent))
+                    .border_type(crate::ui::interface_border_type(
+                        self.config.rounded_borders,
+                    ))
+                    .border_style(
+                        ratatui::style::Style::default()
+                            .fg(palette.popup_border.unwrap_or(palette.accent)),
+                    )
                     .title(popup.title.clone())
-                    .style(ratatui::style::Style::default().bg(self.config.palette.panel_bg));
+                    .style(
+                        ratatui::style::Style::default()
+                            .bg(palette.popup_bg.unwrap_or(palette.panel_bg)),
+                    );
                 ratatui::widgets::Widget::render(
                     ratatui::widgets::Clear,
                     geometry.outer,
@@ -580,6 +605,9 @@ impl ClientShellState {
                 ratatui::widgets::Widget::render(block, geometry.outer, &mut composed);
                 frame.replace_from_ratatui_buffer_preserving_effects(&composed, None);
                 blit_pane_surface(&mut frame, &popup.frame, geometry.inner);
+                if let Some(popup_bg) = self.config.palette.popup_bg {
+                    fill_default_background(&mut frame, &popup.frame, geometry.inner, popup_bg);
+                }
                 self.hits.popup = Some(PaneHit {
                     rect: geometry.outer,
                     inner_rect: geometry.inner,
@@ -647,6 +675,9 @@ impl ClientShellState {
             let cursor = if let ClientShellOverlay::ContextMenu(menu) = overlay {
                 let rendered =
                     render::render_context_menu(&mut composed, menu, &self.config.palette)?;
+                if self.config.rounded_borders {
+                    crate::ui::round_buffer_corners(&mut composed, rendered.area);
+                }
                 occlusion.cover(rendered.area);
                 self.hits.context_menu_rows = rendered.menu_rows;
                 None
@@ -658,6 +689,9 @@ impl ClientShellState {
                     snapshot,
                     &self.config.palette,
                 )?;
+                if self.config.rounded_borders {
+                    crate::ui::round_buffer_corners(&mut composed, rendered.area);
+                }
                 occlusion.cover(rendered.area);
                 self.hits.global_menu_rows = rendered.menu_rows;
                 None
@@ -671,6 +705,10 @@ impl ClientShellState {
                     &self.config.keybinds,
                     &self.config.palette,
                 )?;
+                if self.config.rounded_borders {
+                    crate::ui::round_buffer_corners(&mut composed, rendered.area);
+                    crate::ui::round_buffer_corners(&mut composed, rendered.navigator_popup);
+                }
                 occlusion.cover(rendered.area);
                 self.hits.overlay_primary = rendered.primary;
                 self.hits.overlay_clear = rendered.clear;
@@ -722,6 +760,126 @@ impl ClientShellState {
         }
         let graphics = self.compose_graphics(layout, &occlusion);
         Some(crate::client::frame_output::ComposedFrame { frame, graphics })
+    }
+}
+
+/// Packed `pane_inactive_bg` tint, or None when the baseline applies (unset or Reset).
+pub(super) fn inactive_pane_tint(palette: &crate::app::state::Palette) -> Option<u32> {
+    palette
+        .pane_inactive_bg
+        .filter(|bg| *bg != ratatui::style::Color::Reset)
+        .map(crate::protocol::color_to_u32)
+}
+
+/// Unfocused-pane presentation, resolved once per compose or retained patch: the
+/// `pane_inactive_bg` tint and the `inactive_pane_dim_percent` de-emphasis. Both act only on
+/// cells whose logical background is the terminal default. The tint resolves first; the dim
+/// keeps that pre-tint eligibility and blends toward the displayed background (the tint when
+/// set). It never changes backgrounds itself.
+pub(super) struct InactivePaneStyle {
+    tint: Option<u32>,
+    dim: Option<super::inactive_dim::InactivePaneDim>,
+}
+
+impl InactivePaneStyle {
+    pub(super) fn resolve(state: &ClientShellState) -> Option<Self> {
+        let tint = inactive_pane_tint(&state.config.palette);
+        let dim = state.inactive_pane_dim();
+        (tint.is_some() || dim.is_some()).then_some(Self { tint, dim })
+    }
+
+    /// Pane-agnostic cell rule shared by full composition and retained surface patches.
+    /// Callers select cells inside unfocused panes' `inner_rect` once per pane or row span.
+    /// The server sends explicit ANSI backgrounds as indexed/RGB and resolves reverse video to
+    /// a concrete color, so only default cells match.
+    fn apply_cell(&self, cell: &mut crate::protocol::CellData) {
+        if cell.bg != crate::protocol::color_to_u32(ratatui::style::Color::Reset) {
+            return;
+        }
+        if let Some(dim) = &self.dim {
+            dim.apply_default_background_cell(cell);
+        }
+        if let Some(tint) = self.tint {
+            cell.bg = tint;
+        }
+    }
+}
+
+/// Tints one retained patch row with only `pane_inactive_bg` applied.
+#[cfg(test)]
+pub(super) fn tint_inactive_pane_row(
+    panes: &[crate::protocol::PaneSurfacePane],
+    x: u16,
+    y: u16,
+    cells: &mut [crate::protocol::CellData],
+    tint: u32,
+) {
+    let style = InactivePaneStyle {
+        tint: Some(tint),
+        dim: None,
+    };
+    style_inactive_pane_row(panes, x, y, cells, &style);
+}
+
+/// Styles one retained patch row starting at surface-relative `(x, y)`: unfocused pane spans
+/// crossing the row are found once per row, then only their cells are visited.
+pub(super) fn style_inactive_pane_row(
+    panes: &[crate::protocol::PaneSurfacePane],
+    x: u16,
+    y: u16,
+    cells: &mut [crate::protocol::CellData],
+    style: &InactivePaneStyle,
+) {
+    let row_end = usize::from(x) + cells.len();
+    for pane in panes.iter().filter(|pane| !pane.focused) {
+        let inner = pane.inner_rect;
+        if y < inner.y || y >= inner.y.saturating_add(inner.height) {
+            continue;
+        }
+        let start = usize::from(inner.x).max(usize::from(x));
+        let end = (usize::from(inner.x) + usize::from(inner.width)).min(row_end);
+        if start >= end {
+            continue;
+        }
+        let offset = usize::from(x);
+        for cell in &mut cells[start - offset..end - offset] {
+            style.apply_cell(cell);
+        }
+    }
+}
+
+/// Tints and de-emphasizes default-background cells inside unfocused panes after the surface
+/// blit, in one pass per pane. Selection and copy highlights are painted afterwards.
+fn paint_inactive_pane_default_background(
+    frame: &mut FrameData,
+    surface: &crate::protocol::PaneSurfaceFrame,
+    area: Rect,
+    style: &InactivePaneStyle,
+) {
+    let width = usize::from(frame.width);
+    // Only cells copied from the surface by `blit_pane_surface`.
+    let area = Rect::new(
+        area.x,
+        area.y,
+        surface.frame.width.min(area.width),
+        surface.frame.height.min(area.height),
+    );
+    for pane in surface.panes.iter().filter(|pane| !pane.focused) {
+        let inner = Rect::new(
+            area.x.saturating_add(pane.inner_rect.x),
+            area.y.saturating_add(pane.inner_rect.y),
+            pane.inner_rect.width,
+            pane.inner_rect.height,
+        )
+        .intersection(area);
+        for y in inner.top()..inner.bottom() {
+            let row = usize::from(y) * width;
+            for x in inner.left()..inner.right() {
+                if let Some(cell) = frame.cells.get_mut(row + usize::from(x)) {
+                    style.apply_cell(cell);
+                }
+            }
+        }
     }
 }
 

@@ -271,7 +271,14 @@ dark_name = "catppuccin"
 
 ```toml
 [theme.custom]
+active_tab_fg = "#181825"
+active_tab_bg = "#89b4fa"
+pane_border_active = "#89b4fa"
+pane_border_inactive = "#6c7086"
 sidebar_bg = "#181825"
+popup_bg = "#181825"
+popup_border = "#89b4fa"
+pane_inactive_bg = "#11111b"
 active_row_bg = "#1e1e2e"
 selection_bg = "#313244"
 panel_bg = "reset"
@@ -284,7 +291,15 @@ yellow = "#f9e2af"
 
 `sidebar_bg` 可单独设置桌面侧边栏的背景色。省略时，侧边栏继续使用宿主终端背景。`active_row_bg` 可更改当前 Space 和已聚焦 Agent 行的背景色，而不会影响分隔线或滚动条轨道。`selection_bg` 可更改侧边栏中 Navigate 模式光标行的背景色。
 
-颜色值支持十六进制、命名颜色、`rgb(r,g,b)`，以及 `reset`、`default`、`none`、`transparent` 等重置别名。
+`active_tab_fg` 和 `active_tab_bg` 可独立更改已聚焦标签页标签的前景色与背景色，不影响非活动标签页或状态段。省略时，前景色跟随解析后的 `panel_bg`（当 `panel_bg` 为重置值时使用 `surface_dim`），背景色跟随解析后的 `accent`。重置别名明确使用终端默认色，而不是继承。自定义标签保留原有粗体，标签栏的显示条件也不会改变。
+
+`pane_border_active` 和 `pane_border_inactive` 仅更改已聚焦和未聚焦窗格的边框及窗格边框标题颜色，不影响标签页、弹出窗口、浮层、侧边栏或其他使用 `accent` 的位置。省略时，已聚焦窗格跟随解析后的 `accent`，未聚焦窗格跟随解析后的 `overlay0`，因此现有的 `accent` 和 `overlay0` 覆盖仍然生效。重置别名明确使用终端默认前景色，而不是继承。将两者设为相同值会有意消除已聚焦与未聚焦窗格之间的颜色差异；已聚焦窗格的标题仍保持粗体。模式子表中省略的字段继承 `[theme.custom]`，且仅在启用 `auto_switch` 时生效。实时重载配置即可应用更改，移除覆盖会恢复默认色。
+
+`popup_bg` 和 `popup_border` 用于由弹窗命令或 `placement = "popup"` 的插件窗格打开的终端弹窗。`popup_bg` 会填充弹窗中的空白单元格，以及使用默认背景的弹窗终端单元格；程序显式设置的背景色保持不变。`popup_border` 设置弹窗边框及其标题的颜色。省略时，弹窗框架保留解析后的 `panel_bg` 背景和 `accent` 边框，弹窗终端单元格保留终端默认背景。重置别名明确使用终端默认色，而不是继承。窗格、标签页、浮层以及其他 `accent` 用途不受影响。
+
+`pane_inactive_bg` 可为未聚焦窗格的终端默认背景着色，使已聚焦窗格更醒目。只有没有显式 ANSI 背景色的单元格（包括空白）会改变；程序自身的背景色、反色显示和选区保持不变，通过 OSC 11 设置了自身默认背景的程序也会保留该颜色。已聚焦窗格、弹出窗口、边框和侧边栏不会改变。省略时窗格外观与之前完全相同；重置别名保留终端默认色。
+
+颜色值支持十六进制（`#rgb` 或 `#rrggbb`）、命名颜色、`rgb(r,g,b)`，以及 `reset`、`default`、`none`、`transparent` 等重置别名。
 
 启用 `auto_switch` 后，可以通过明暗模式子表在共享自定义颜色之上应用不同的覆盖值：
 
@@ -293,21 +308,89 @@ yellow = "#f9e2af"
 accent = "#89b4fa"
 
 [theme.custom.light]
+active_tab_fg = "#eff1f5"
+active_tab_bg = "#1e66f5"
+pane_border_active = "#1e66f5"
+popup_border = "#1e66f5"
+pane_inactive_bg = "#e6e9ef"
 panel_bg = "#eff1f5"
 text = "#4c4f69"
 
 [theme.custom.dark]
+active_tab_fg = "#181825"
+active_tab_bg = "#89b4fa"
+pane_border_active = "#89b4fa"
+popup_border = "#89b4fa"
+pane_inactive_bg = "#11111b"
 panel_bg = "#1e1e2e"
 text = "#cdd6f4"
 ```
 
-有效调色板按以下顺序应用：内置主题、`[theme.custom]`，然后是 `[theme.custom.light]` 或 `[theme.custom.dark]`。省略模式子表时，会保留现有的共享覆盖行为。
+有效调色板按以下顺序应用：内置主题、`[theme.custom]`，然后是 `[theme.custom.light]` 或 `[theme.custom.dark]`。省略模式字段时继承公共值；公共活动标签颜色也省略时，使用上述动态默认色。禁用 `auto_switch` 时忽略模式覆盖。首次加载、实时重载配置和宿主外观变化使用同一解析逻辑。重载时移除活动标签颜色覆盖会恢复继承或默认色。
+有效调色板按以下顺序应用：内置主题、`[theme.custom]`，然后是 `[theme.custom.light]` 或 `[theme.custom.dark]`。省略模式子表时，会保留现有的共享覆盖行为。省略模式弹窗字段时继承公共值。首次加载、实时重载配置和宿主外观变化使用同一解析逻辑，重载时移除弹窗颜色覆盖会恢复默认弹窗颜色。
 
 ## UI 与侧边栏
 
 侧边栏是 Herdr 的主仪表盘。在[配置参考](/docs/config-reference/)中搜索 `ui.`，可查看尺寸、折叠模式、Agent 面板排序、鼠标行为、窗格边框和其他显示设置。
 
+在 `[ui]` 下设置 `sidebar_padding_cells = N`，可在展开侧边栏的每个分区内部四周各留出 N 个空白单元格。默认值 `0` 保持现有布局。侧边栏宽度、空间与代理之间的分割位置、分隔线和折叠按钮都保持不变；分区标题、列表、滚动条、底栏及其点击区域会一起向内移动。在较窄或较矮的分区中，内边距只会按需缩小，以保留至少一个可用单元格；折叠后的窄栏不添加内边距。修改会在重新加载配置时生效。若值不是 0 到 65535 之间的整数，会给出提示，并且只禁用此设置。
+
 `ui.pane_borders` 接受 `"auto"`（默认值，仅为分割窗格显示边框）、`"always"`（也为单个窗格显示边框）或 `"off"`。单窗格的所有边都是外边，因此还需要 `ui.pane_outer_borders = true` 才会显示边框。旧的布尔值仍然有效：`true` 对应 `"auto"`，`false` 对应 `"off"`。
+
+在 `[ui]` 下设置 `rounded_borders = true`，可将现有窗格、弹出窗口、菜单、对话框和通知边框的轻线条转角显示为圆角。默认值为 `false`，保持原有外观。此客户端本地选项支持重新加载，不改变终端尺寸、内边距、点击区域或边框可见性。共享的 T 形／十字连接处及双线／粗线转角仍保持方角；终端应用的内容不会被重新设置样式。
+
+在 `[ui]` 下设置 `pane_border_style` 可选择窗格边框的线型；`pane_border_style_active` 和 `pane_border_style_inactive` 可分别仅覆盖当前聚焦窗格或未聚焦窗格的线型：
+
+```toml
+[ui]
+pane_border_style = "rounded"
+pane_border_style_active = "heavy"
+```
+
+位于聚焦窗格边框上的单元格（即获得焦点颜色的单元格，包括其右侧和下方的共享分隔线）使用 active 线型，其余边框单元格使用 inactive 线型。优先级为 **状态覆盖 → `pane_border_style` → `light`**。三个键都未设置时，窗格边框与以前完全相同。无效值会被报告并忽略，`[ui]` 中的其他设置仍然生效。窗格尺寸、分隔线位置和点击区域都不会改变。
+
+| 线型 | 字符 | 说明 |
+|---|---|---|
+| `light` | `┌─┐│└┘` | 默认外观 |
+| `rounded` | `╭─╮│╰╯` | 细线加圆角 |
+| `heavy` | `┏━┓┃┗┛` | |
+| `double` | `╔═╗║╚╝` | |
+| `light-dashed-2`、`-3`、`-4` | `╌╎`、`┄┆`、`┈┊` | 细虚线边；转角和连接处为细实线 |
+| `heavy-dashed-2`、`-3`、`-4` | `╍╏`、`┅┇`、`┉┋` | 粗虚线边；转角和连接处为粗实线 |
+| `rounded-dashed-2`、`-3`、`-4` | 细虚线边和 `╭╮╰╯` 转角 | |
+
+与其他设置的组合：
+
+| 组合 | 结果 |
+|---|---|
+| 任意线型 × 焦点颜色（主题键 `pane_border_active` / `pane_border_inactive`） | 可叠加；颜色与字符相互独立 |
+| 任意线型 × 窗格标题 | 可叠加；标题位于上边 |
+| 任意线型 × `pane_gaps` | 可叠加 |
+| 任意线型 × `pane_gap_cells` | 可叠加；`pane_gap_cells = 0` 与 `pane_gaps = false` 一样共享分隔线，N ≥ 1 时每个窗格都有自己线型的边框 |
+| 任意线型 × `pane_padding_cells` | 可叠加；内边距位于边框内侧，不改变边框字符，`rounded` 圆角仍在边框转角处 |
+| 窗格线型 × `sidebar_padding_cells` | 互不影响；侧边栏内边距只移动侧边栏内容，不影响窗格边框 |
+| 任意线型 × `pane_title_tokens` | 可叠加；组合标题以其令牌颜色和焦点粗体替换上边的单元格，标题之后的边保持窗格线型（包括虚线） |
+| 任意线型 × `pane_border_identity_token` | 可叠加；字符来自窗格线型，颜色来自标识色或焦点色，二者相互独立。在共享分隔线上，聚焦窗格的线型和颜色都优先 |
+| 任意线型 × `pane_inactive_bg`（主题键） | 可叠加；着色只填充未聚焦窗格的内容，边框字符和颜色不变 |
+| 任意线型 × `inactive_pane_dim_percent` | 可叠加；淡化只作用于未聚焦窗格的文字，边框字符和颜色保持配置不变 |
+| 圆角 × 粗线或双线 | Unicode 没有粗线或双线圆角，因此粗线和双线转角保持方角 |
+| 虚线 × 转角和连接处 | 只有直线段为虚线；转角、T 形和十字连接处为相同粗细的实线 |
+| 共享分隔线上不同线型相遇（`pane_gaps = false` 或 `pane_gap_cells = 0`） | 与焦点颜色一样，聚焦窗格边框上以其线型为准。连接处在 Unicode 有对应混合字符时使用该字符（所有细线与粗线的组合，以及纵横分开的细线与双线组合）；否则含双线的连接处整体使用双线。与实线共享的虚线段采用胜出一方的线型 |
+| 窗格线型 × `rounded_borders` | `rounded_borders` 仍在客户端将细线窗格转角和其他界面边框改为圆角；粗线和双线转角保持方角，`rounded` 类线型绘制的圆角保持不变 |
+| 窗格线型 × 弹出窗口、菜单和对话框 | 窗格线型只作用于窗格边框 |
+| `pane_borders = "off"` / `pane_outer_borders = false` | 未绘制边框的位置不应用任何线型 |
+
+块字符边框（象限、八分之一块和比例块）计划在以后的版本中提供。
+
+在 `[ui]` 下设置 `pane_gap_cells = N`，可按终端单元格数（0 到 65535）指定分割窗格之间的空白。设置后将覆盖 `pane_gaps`：`0` 表示共享分隔边框，`N` 表示在相邻窗格的边框之间留出 N 个空白单元格（边框线另计）；当 `pane_borders = "off"` 时，这 N 个单元格用于分隔窗格内容。空白取自每个分割处左侧或上方的窗格；外边缘、侧边栏和窗格内部保持不变。窗口较小时，间距只会缩小到让每个窗格保留一行一列可用空间所需的程度，窗口变大后会恢复。不设置时保持 `pane_gaps` 的行为；无效值会被报告并忽略。
+
+在 `[ui]` 下设置 `pane_padding_cells = 2`，可在每个窗格的边框与终端内容之间的四边各保留 2 个空白单元格。关闭边框时同样有效，此时内容会从窗格边缘向内缩进。终端尺寸和鼠标位置以缩进后的区域为准，滚动条保留在自己的列中。窗格较小时会缩减内边距，使终端至少保留 4 列 2 行；已小于该尺寸的窗格在对应方向上不加内边距。默认值 `0` 保持原有布局，此设置不会改变窗格间距或侧边栏。无效值只会禁用此设置，并给出配置诊断信息。
+
+在 `[ui]` 下设置 `pane_title_tokens`，可使用与 `ui.sidebar.agents.rows` 相同的令牌行格式组成窗格边框标题，例如 `pane_title_tokens = ["tab", { token = "$task", fg = "#f38ba8" }]`。支持文本内置令牌（`workspace`、`tab`、`pane`、`agent`、`terminal_title`、`terminal_title_stripped`）和 `$name` 窗格元数据令牌；`state_icon`、`state_text` 和 `machine` 在标题中视为缺失。令牌会随 `herdr pane report-metadata` 的更新、清除和 TTL 过期实时刷新。缺失的令牌会被跳过；如果没有剩余文本，标题依次回退到上报的标题、手动标签，以及启用 `show_agent_labels_on_pane_borders` 时的代理标签。令牌颜色优先于边框标题颜色，聚焦窗格会额外加粗。标题按窗格宽度用 `…` 截断。设置 `pane_manual_label_first = true` 可让非空的手动窗格标签优先于上报的标题和令牌。要在单个窗格上显示标题，请使用 `pane_borders = "always"`。
+
+在 `[ui]` 下设置 `pane_border_identity_token`，可用一个与 `ui.sidebar.agents.rows` 条目格式相同的令牌为未聚焦窗格的边框线着色，例如 `pane_border_identity_token = { token = "$role", rules = [{ equals = "review", fg = "#f9e2af" }, { equals = "build", fg = "#a6e3a1" }] }`，再配合 `herdr pane report-metadata <pane_id> --source ID --token role=build`。当令牌解析出文本且其样式带有 `fg` 时，该颜色用于此窗格的非活动边框线；令牌缺失、被清除、已过期或没有 `fg` 时，保留常规的非活动边框颜色。聚焦窗格始终保持强调色；仅由未聚焦窗格共享的分隔线或交汇点，只有在所有共享它的窗格颜色相同时才使用该颜色。标题和窗格背景不变。与其他窗格边框设置一样，读取的是服务器端的配置。
+
+在 `[ui]` 下设置 `inactive_pane_dim_percent = N`（0 到 100，默认 `0` 表示关闭），可在你于聚焦窗格中输入时淡化未聚焦窗格的文字。Herdr 会把每个文字颜色按 N% 向终端默认背景色混合，仅影响屏幕显示：窗格内容、复制的文本和其中运行的程序都不会改变。它只在普通终端模式下生效（前缀、复制、导航和调整大小模式下窗格保持原样），并且不会改变背景色、边框、焦点强调色、faint 文字、选区，或绘制在自身背景色上的文字（包括反显）。它需要终端响应默认颜色和调色板的查询；终端未报告的颜色保持不变。`100` 会让文字与背景色相同。`inactive_pane_dim_exclude_processes = ["name", ...]` 可用于列出不淡化的前台程序，该设置会被接受，但目前没有效果，因为 Herdr 在绘制时无法获知窗格的前台进程。两个键的无效值都会被报告并忽略。
 
 在 `[ui]` 下设置 `tab_bar_position = "bottom"`，可将桌面标签栏放到终端窗格下方。Prefix、Navigate、Copy 和 Resize 模式栏会在显示期间临时替换底部标签栏。默认值为 `"top"`。
 

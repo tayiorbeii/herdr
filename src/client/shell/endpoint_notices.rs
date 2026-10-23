@@ -59,6 +59,7 @@ pub(super) fn render_notice(
     notice: &ClientVisibleEndpointNotice,
     top_offset: u16,
     palette: &Palette,
+    rounded_borders: bool,
 ) -> Rect {
     super::notifications::render_notification_card(
         buffer,
@@ -76,5 +77,6 @@ pub(super) fn render_notice(
             }
         },
         palette,
+        rounded_borders,
     )
 }
