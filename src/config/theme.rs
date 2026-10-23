@@ -103,6 +103,8 @@ pub struct CustomThemeColors {
     pub accent: Option<String>,
     pub active_tab_fg: Option<String>,
     pub active_tab_bg: Option<String>,
+    pub pane_border_active: Option<String>,
+    pub pane_border_inactive: Option<String>,
     pub panel_bg: Option<String>,
     pub sidebar_bg: Option<String>,
     pub active_row_bg: Option<String>,
@@ -134,6 +136,8 @@ pub struct ModeThemeColors {
     pub accent: Option<String>,
     pub active_tab_fg: Option<String>,
     pub active_tab_bg: Option<String>,
+    pub pane_border_active: Option<String>,
+    pub pane_border_inactive: Option<String>,
     pub panel_bg: Option<String>,
     pub sidebar_bg: Option<String>,
     pub active_row_bg: Option<String>,
@@ -314,6 +318,31 @@ active_tab_bg = "transparent"
         let dark = custom.dark.unwrap();
         assert!(dark.active_tab_fg.is_none());
         assert_eq!(dark.active_tab_bg.as_deref(), Some("transparent"));
+    }
+
+    #[test]
+    fn pane_border_color_fields_parse_in_common_and_modes() {
+        let config: Config = toml::from_str(
+            r##"
+[theme.custom]
+pane_border_active = "#123456"
+pane_border_inactive = "reset"
+[theme.custom.light]
+pane_border_active = "blue"
+[theme.custom.dark]
+pane_border_inactive = "transparent"
+"##,
+        )
+        .unwrap();
+        let custom = config.theme.custom.unwrap();
+        assert_eq!(custom.pane_border_active.as_deref(), Some("#123456"));
+        assert_eq!(custom.pane_border_inactive.as_deref(), Some("reset"));
+        let light = custom.light.unwrap();
+        assert_eq!(light.pane_border_active.as_deref(), Some("blue"));
+        assert!(light.pane_border_inactive.is_none());
+        let dark = custom.dark.unwrap();
+        assert!(dark.pane_border_active.is_none());
+        assert_eq!(dark.pane_border_inactive.as_deref(), Some("transparent"));
     }
 
     #[test]
