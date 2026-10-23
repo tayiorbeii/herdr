@@ -363,14 +363,17 @@ How pane styles stack with other settings:
 | any style × focus colors (`pane_border_active` / `pane_border_inactive` theme keys) | stacks; color and glyph are independent |
 | any style × pane titles | stacks; titles sit on the top edge |
 | any style × `pane_gaps` | stacks |
+| any style × `pane_gap_cells` | stacks; `pane_gap_cells = 0` shares dividers like `pane_gaps = false`, and N ≥ 1 gives every pane its own styled frame |
 | rounded corners × heavy or double | Unicode has no heavy or double arcs, so heavy and double corners stay square |
 | dashed × corners and junctions | only straight runs are dashed; corners, T-junctions and crosses are solid in the matching weight |
-| different styles at a shared divider (`pane_gaps = false`) | the focused pane's style wins on its frame, like the focus color. Junctions use the exact mixed glyph where Unicode has one (every light/heavy mix, and light/double mixes split across the two axes); otherwise a junction with a double arm is drawn entirely double. A dashed segment shared with a solid style takes the winner's style |
+| different styles at a shared divider (`pane_gaps = false` or `pane_gap_cells = 0`) | the focused pane's style wins on its frame, like the focus color. Junctions use the exact mixed glyph where Unicode has one (every light/heavy mix, and light/double mixes split across the two axes); otherwise a junction with a double arm is drawn entirely double. A dashed segment shared with a solid style takes the winner's style |
 | pane styles × `rounded_borders` | `rounded_borders` still rounds light pane corners and other interface frames on the client; heavy and double corners stay square, and arcs drawn by a `rounded` style are left as they are |
 | pane styles × popups, menus and dialogs | pane styles apply only to pane frames |
 | `pane_borders = "off"` / `pane_outer_borders = false` | nothing is styled where no frame is drawn |
 
 Block-character frames (quadrant, one-eighth and proportional blocks) are planned for a later release.
+
+Set `pane_gap_cells = N` under `[ui]` to choose the blank space between split panes, in terminal cells (0 to 65535). When set it overrides `pane_gaps`: `0` shares divider borders, and `N` leaves N empty cells between neighbouring pane frames, with the frame lines in addition; with `pane_borders = "off"` the N cells separate pane contents. The space comes from the left or upper pane at each split; outer edges, the sidebar and pane interiors are unchanged. In a small window the gap shrinks only as far as needed to keep one usable row and column in each pane, and returns when the window grows. Leave it unset to keep the `pane_gaps` behavior; a malformed value is reported and ignored.
 
 Set `tab_bar_position = "bottom"` under `[ui]` to place the desktop tab row below the terminal panes. Prefix, Navigate, Copy, and Resize mode bars temporarily replace the bottom tab row while active. The default is `"top"`.
 
