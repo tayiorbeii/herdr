@@ -109,6 +109,7 @@ pub struct CustomThemeColors {
     pub popup_border: Option<String>,
     pub panel_bg: Option<String>,
     pub sidebar_bg: Option<String>,
+    pub pane_inactive_bg: Option<String>,
     pub active_row_bg: Option<String>,
     pub selection_bg: Option<String>,
     pub surface0: Option<String>,
@@ -144,6 +145,7 @@ pub struct ModeThemeColors {
     pub popup_border: Option<String>,
     pub panel_bg: Option<String>,
     pub sidebar_bg: Option<String>,
+    pub pane_inactive_bg: Option<String>,
     pub active_row_bg: Option<String>,
     pub selection_bg: Option<String>,
     pub surface0: Option<String>,
@@ -372,6 +374,30 @@ popup_border = "transparent"
         let dark = custom.dark.unwrap();
         assert!(dark.popup_bg.is_none());
         assert_eq!(dark.popup_border.as_deref(), Some("transparent"));
+    }
+
+    #[test]
+    fn pane_inactive_bg_fields_parse_in_common_and_modes() {
+        let config: Config = toml::from_str(
+            r##"
+[theme.custom]
+pane_inactive_bg = "#181825"
+[theme.custom.light]
+pane_inactive_bg = "reset"
+[theme.custom.dark]
+accent = "blue"
+"##,
+        )
+        .unwrap();
+        let custom = config.theme.custom.unwrap();
+        assert_eq!(custom.pane_inactive_bg.as_deref(), Some("#181825"));
+        assert_eq!(
+            custom.light.unwrap().pane_inactive_bg.as_deref(),
+            Some("reset")
+        );
+        assert!(custom.dark.unwrap().pane_inactive_bg.is_none());
+        let absent: Config = toml::from_str("[theme]\nname = \"terminal\"\n").unwrap();
+        assert!(absent.theme.custom.is_none());
     }
 
     #[test]
