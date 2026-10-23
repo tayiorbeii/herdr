@@ -332,6 +332,8 @@ The active palette is applied in this order: built-in theme, `[theme.custom]`, t
 
 The sidebar is the main Herdr dashboard. Search `ui.` in the [Config reference](/docs/config-reference/) for sizing, collapsed mode, Agent panel ordering, mouse behavior, pane borders, and other presentation settings.
 
+Set `sidebar_padding_cells = N` under `[ui]` to leave N empty cells inside each expanded sidebar section on every side. The default `0` keeps the existing layout. The sidebar width, the split between spaces and agents, the divider and the collapse toggle stay where they are; section titles, lists, scrollbars, footers and their click targets move inward together. Padding shrinks only as needed to keep one usable cell in a narrow or short section, and the collapsed rail is not padded. Changes apply on config reload. A value that is not a whole number from 0 to 65535 is reported and disables only this setting.
+
 `ui.pane_borders` accepts `"auto"` (the default, borders only for split panes), `"always"` (also frame a single pane), or `"off"`. A single-pane frame requires `ui.pane_outer_borders = true`, because all its edges are outer edges. Existing boolean values remain valid: `true` means `"auto"` and `false` means `"off"`.
 
 Set `rounded_borders = true` under `[ui]` to round light corners on existing pane, popup, menu, dialog and toast frames. The default is `false`, which preserves existing appearance. This client-local preference reloads without changing terminal dimensions, padding, hit targets or border visibility. Shared T/cross junctions and double/heavy corners remain square; terminal application content is not restyled.
@@ -365,6 +367,7 @@ How pane styles stack with other settings:
 | any style × `pane_gaps` | stacks |
 | any style × `pane_gap_cells` | stacks; `pane_gap_cells = 0` shares dividers like `pane_gaps = false`, and N ≥ 1 gives every pane its own styled frame |
 | any style × `pane_padding_cells` | stacks; padding sits inside the frame and never changes its glyphs, and `rounded` arcs stay on the frame corners |
+| pane styles × `sidebar_padding_cells` | independent; sidebar padding only moves sidebar content and never touches pane frames |
 | rounded corners × heavy or double | Unicode has no heavy or double arcs, so heavy and double corners stay square |
 | dashed × corners and junctions | only straight runs are dashed; corners, T-junctions and crosses are solid in the matching weight |
 | different styles at a shared divider (`pane_gaps = false` or `pane_gap_cells = 0`) | the focused pane's style wins on its frame, like the focus color. Junctions use the exact mixed glyph where Unicode has one (every light/heavy mix, and light/double mixes split across the two axes); otherwise a junction with a double arm is drawn entirely double. A dashed segment shared with a solid style takes the winner's style |

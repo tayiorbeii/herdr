@@ -928,6 +928,28 @@ resume_agents_on_restore = true
     }
 
     #[test]
+    fn load_live_config_keeps_ui_valid_with_malformed_sidebar_padding() {
+        let loaded = load_live_config_from_str(
+            r#"
+[ui]
+sidebar_padding_cells = -2
+sidebar_width = 31
+"#,
+        )
+        .unwrap();
+
+        assert!(loaded.invalid_sections.is_empty());
+        assert_eq!(loaded.config.ui.sidebar_width, 31);
+        assert_eq!(loaded.config.ui.sidebar_padding_cells.cells(), 0);
+        assert!(loaded
+            .config
+            .ui
+            .sidebar_padding_cells
+            .diagnostic()
+            .is_some());
+    }
+
+    #[test]
     fn load_live_config_warns_about_unknown_theme_names() {
         let loaded = load_live_config_from_str(
             r#"

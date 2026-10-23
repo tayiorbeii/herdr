@@ -52,9 +52,12 @@ pub(super) fn render_expanded(
     agent_scroll: &mut usize,
     hits: &mut ShellHitMap,
 ) {
+    let (divider, content) =
+        super::agent_sidebar::agent_section_rects(area, config.sidebar_padding_cells);
     if !super::agent_sidebar::render_agent_panel_header(
         buffer,
-        area,
+        divider,
+        content,
         agent_view_label,
         config,
         hits,
@@ -64,7 +67,7 @@ pub(super) fn render_expanded(
     let rows = agent_rows(endpoints, active_endpoint_id, config);
     super::agent_sidebar::render_agent_list(
         buffer,
-        area,
+        content,
         &rows,
         agent_view_label.map(|_| " no matching agents"),
         config,

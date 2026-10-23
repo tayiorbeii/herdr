@@ -22,6 +22,7 @@ pub(crate) struct ClientShellConfig {
     pub(super) tab_bar_position: TabBarPositionConfig,
     pub(super) hide_tab_bar_when_single_tab: bool,
     pub(super) rounded_borders: bool,
+    pub(super) sidebar_padding_cells: u16,
     pub(super) spaces: SpacesSidebarConfig,
     pub(super) agents: crate::config::AgentsSidebarConfig,
     pub(super) agent_panel_sort: crate::config::AgentPanelSortConfig,
