@@ -88,6 +88,10 @@ impl MetadataTokens {
             .collect()
     }
 
+    pub(crate) fn get(&self, key: &str) -> Option<&str> {
+        self.entries.get(key).map(|token| token.value.as_str())
+    }
+
     pub(crate) fn next_expiry(&self) -> Option<Instant> {
         self.entries
             .values()
